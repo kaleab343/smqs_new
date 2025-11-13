@@ -155,6 +155,11 @@ class AppointmentsController
                             if ($u && isset($u['user_id'])) { $existingUserId = (int)$u['user_id']; }
                         }
                         if ($existingUserId) {
+                            // Do not allow booking if the email belongs to a user with doctor role
+                            if (isset($u['role']) && strtolower((string)$u['role']) === 'doctor') {
+                                $pdo->rollBack();
+                                return Response::json(['error' => 'User with this email is a doctor and cannot be booked as a patient'], 400);
+                            }
                             $userId = $existingUserId;
                         } else {
                             // Create user with unique username
@@ -183,6 +188,19 @@ class AppointmentsController
                         $autoCreatedPatient = true;
                     }
                 }
+
+                // Validate: patient must not be a doctor user
+                try {
+                    $usersTbl = Database::table('users');
+                    $patientsTbl = Database::table('patients');
+                    $stmtChk = $pdo->prepare("SELECT u.role FROM {$patientsTbl} p JOIN {$usersTbl} u ON u.user_id = p.user_id WHERE p.patient_id = :pid LIMIT 1");
+                    $stmtChk->execute([':pid' => $patient_id]);
+                    $r = $stmtChk->fetch();
+                    if ($r && strtolower((string)($r['role'] ?? '')) === 'doctor') {
+                        $pdo->rollBack();
+                        return Response::json(['error' => 'Doctors cannot be booked as patients'], 400);
+                    }
+                } catch (Throwable $e) { /* ignore, will proceed; other checks exist */ }
 
                 // Create appointment and queue records
                 $appointments = new AppointmentModel();

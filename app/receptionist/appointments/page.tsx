@@ -69,6 +69,26 @@ export default function ReceptionistAppointmentsPage() {
     console.log("[v0] Creating new appointment")
     if (patientName && (doctorId || doctorName) && appointmentDate && appointmentTime) {
       try {
+        // Front-end guard: if patientEmail belongs to a user with doctor role, block
+        if (patientEmail) {
+          try {
+            const resUsers = await fetch('/api/php/users', { cache: 'no-store' })
+            if (resUsers.ok) {
+              const users = await resUsers.json().catch(() => [])
+              if (Array.isArray(users)) {
+                const match = users.find((u: any) => String(u.email || '').toLowerCase() === String(patientEmail).toLowerCase())
+                if (match && String(match.role || '').toLowerCase() === 'doctor') {
+                  alert('This email belongs to a doctor. Doctors cannot be booked as patients.')
+                  return
+                }
+              }
+            }
+          } catch (e) {
+            // If user check fails, continue; backend will enforce as well
+            console.warn('User role check failed', e)
+          }
+        }
+
         const scheduled_time = `${appointmentDate} ${appointmentTime}:00`
         const payload: any = {
           doctor_id: doctorId || undefined,
