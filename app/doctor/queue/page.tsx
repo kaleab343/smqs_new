@@ -317,7 +317,6 @@ export default function DoctorQueuePage() {
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Position</th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Patient Name</th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Reason</th>
-                  <th className="text-center py-3 px-4 font-semibold text-gray-700">Wait Time</th>
                   <th className="text-center py-3 px-4 font-semibold text-gray-700">Status</th>
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">Actions</th>
                 </tr>
@@ -338,7 +337,6 @@ export default function DoctorQueuePage() {
                       </td>
                       <td className="py-3 px-4 font-medium text-gray-900">{patient.name}</td>
                       <td className="py-3 px-4 text-gray-600">{patient.reason}</td>
-                      <td className="py-3 px-4 text-center text-gray-600">{patient.waitTime}m</td>
                       <td className="py-3 px-4 text-center">
                         <Badge className={getStatusColor(patient.status)}>
                           <div className="flex items-center gap-1">
@@ -389,7 +387,7 @@ export default function DoctorQueuePage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="py-6 text-center text-gray-500">
+                    <td colSpan={6} className="py-6 text-center text-gray-500">
                       {loading ? "Loading..." : "No patients found"}
                     </td>
                   </tr>
