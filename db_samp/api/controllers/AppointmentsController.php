@@ -157,10 +157,14 @@ class AppointmentsController
                     }
 
                     if ($patient_id === 0) {
-                        // Need at least a name or email to create a user/patient
-                        if (!$patientName && !$patientEmail) {
+                        // Must have an email because both users.email and patients.email are NOT NULL and UNIQUE
+                        if (!$patientEmail) {
                             $pdo->rollBack();
-                            return Response::json(['error' => 'Missing patient details (name or email required)'], 400);
+                            return Response::json(['error' => 'Missing patient email'], 400);
+                        }
+                        // Name is optional but recommended
+                        if (!$patientName) {
+                            $patientName = $patientEmail;
                         }
 
                         // Try to reuse existing user by email
