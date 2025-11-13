@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,6 +17,7 @@ interface CheckedInPatient {
 }
 
 export default function ReceptionistCheckInPage() {
+  const [submitting, setSubmitting] = useState(false)
   const [patients, setPatients] = useState<CheckedInPatient[]>([])
   const [doctors, setDoctors] = useState<Array<{ doctor_id: number; name: string; specialization?: string; status?: string }>>([])
   const [loadingDoctors, setLoadingDoctors] = useState(false)
@@ -116,24 +117,67 @@ export default function ReceptionistCheckInPage() {
     setShowCheckInModal(true)
   }
 
-  const handleSubmitCheckIn = () => {
+  const handleSubmitCheckIn = async () => {
     if (!formData.name || !formData.email) {
       alert("Please fill in required fields")
       return
     }
-
-    const newPatient: CheckedInPatient = {
-      id: String(patients.length + 1),
-      name: formData.name,
-      email: formData.email,
-      checkinTime: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      status: "waiting",
+    if (!formData.doctorId) {
+      alert("Please select a doctor")
+      return
     }
 
-    setPatients([...patients, newPatient])
-    setFormData({ name: "", email: "", reason: "" })
-    setShowCheckInModal(false)
-    console.log("[v0] Patient checked in:", newPatient)
+    try {
+      setSubmitting(true)
+      // Schedule slightly in the future to avoid 'past' validation on the server
+      const now = new Date(Date.now() + 60 * 1000)
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const scheduled = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+
+      const res = await fetch('/api/php/appointments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          doctor_id: Number(formData.doctorId),
+          scheduled_time: scheduled,
+          reason: formData.reason || undefined,
+        }),
+      })
+      const out = await res.json().catch(() => null)
+      if (!res.ok) {
+        const msg = (out && (out.error || out.message || out.details)) || 'Failed to check-in patient'
+        alert(msg)
+        return
+      }
+
+      // Refresh list
+      try {
+        const resList = await fetch('/api/php/appointments', { cache: 'no-store' })
+        const body = await resList.json().catch(() => [])
+        if (Array.isArray(body)) {
+          const mapped: CheckedInPatient[] = body
+            .filter((r: any) => ['waiting','pending','called','in-consultation'].includes(String(r.status || '')))
+            .map((r: any) => ({
+              id: String(r.appointment_id ?? ''),
+              name: String(r.patient_name || r.patient_id || ''),
+              email: String(r.patient_email || ''),
+              checkinTime: toTime(String(r.scheduled_time || '')),
+              status: String(r.status || 'pending') as any,
+            }))
+          setPatients(mapped)
+        }
+      } catch {}
+
+      setFormData({ name: "", email: "", doctorId: "" as any, doctorName: "", reason: "" })
+      setShowCheckInModal(false)
+    } catch (e) {
+      console.error('check-in submit error', e)
+      alert('Failed to check-in patient')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -294,8 +338,8 @@ export default function ReceptionistCheckInPage() {
                 />
               </div>
               <div className="flex gap-2">
-                <Button onClick={handleSubmitCheckIn} className="flex-1 bg-amber-600 hover:bg-amber-700">
-                  Check In
+                <Button onClick={handleSubmitCheckIn} disabled={submitting} className="flex-1 bg-amber-600 hover:bg-amber-700 disabled:opacity-60">
+                  {submitting ? 'Checking In...' : 'Check In'}
                 </Button>
                 <Button onClick={() => setShowCheckInModal(false)} variant="outline" className="flex-1">
                   Cancel
