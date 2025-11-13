@@ -222,15 +222,15 @@ class AppointmentsController
                     }
                 } catch (Throwable $e) { /* ignore, will proceed; other checks exist */ }
 
-                // Block creating a new appointment if patient already has an active one in waiting or pending
+                // Block creating a new appointment if patient already has an active one in 'pending' or 'in-consultation'
                 try {
                     $apptTbl = Database::table('appointments');
-                    $stmtDup = $pdo->prepare("SELECT COUNT(1) AS c FROM {$apptTbl} WHERE patient_id = :pid AND status IN ('waiting','pending')");
+                    $stmtDup = $pdo->prepare("SELECT COUNT(1) AS c FROM {$apptTbl} WHERE patient_id = :pid AND status IN ('pending','in-consultation')");
                     $stmtDup->execute([':pid' => $patient_id]);
                     $dupCount = (int)($stmtDup->fetch()['c'] ?? 0);
                     if ($dupCount > 0) {
                         $pdo->rollBack();
-                        return Response::json(['error' => 'Patient already has an active appointment (waiting or pending)'], 400);
+                        return Response::json(['error' => "Patient already has an active appointment (status pending or in-consultation)", 'code' => 'active_appointment_exists'], 400);
                     }
                 } catch (Throwable $e) { /* ignore - default to allowing if check fails */ }
 

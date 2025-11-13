@@ -83,10 +83,11 @@ export default function DoctorDashboard() {
       setLoadingConsults(true)
       setErrorConsults(null)
       try {
-        // Load doctors and appointments
-        const [doctors, appts] = await Promise.all([
+        // Load doctors, appointments, and today's total count (global)
+        const [doctors, appts, todayCount] = await Promise.all([
           fetchJsonWithFallback("/doctors").catch(() => [] as any[]),
           fetchJsonWithFallback("/appointments").catch(() => [] as any[]),
+          fetchJsonWithFallback("/appointments/today-count").catch(() => ({ count: null })),
         ])
 
         // Resolve doctor id by matching users to doctors; fall back to inferring from appointments
@@ -123,9 +124,12 @@ export default function DoctorDashboard() {
         const completedToday = todaysAppts.filter((a) => (a.status || "").toLowerCase() === "completed")
         const inQueue = todaysAppts.filter((a) => (a.status || "").toLowerCase() !== "completed")
 
-        // Compute stats for top cards (based on today only)
+        // Compute stats for top cards
+        // Total Patients Today should reflect the total number of rows in the appointments table for the current day (global),
+        // falling back to the doctor's todaysAppts length if API not available.
+        const totalToday = (todayCount && typeof todayCount.count === 'number') ? todayCount.count : todaysAppts.length
         const newStats: TodayStats = {
-          totalPatients: todaysAppts.length,
+          totalPatients: totalToday,
           servedToday: completedToday.length,
           currentInQueue: inQueue.length,
           averageConsultationTime: 15, // placeholder; compute if you store durations

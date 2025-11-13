@@ -95,10 +95,13 @@ export default function DoctorQueuePage() {
           apptById.set(Number(a.appointment_id), a)
         }
 
-        // Filter queue by assigned doctor (if doctorId known); otherwise include all
+        // Filter queue by assigned doctor AND by today's scheduled date.
+        const todayStr = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
         const filtered = (q || []).filter((row: any) => {
           const a = apptById.get(Number(row.appointment_id))
-          if (!a) return doctorId == null // include when we can't resolve appointment details and no doctor filter
+          if (!a) return false // cannot verify date/doctor without appointment details
+          const isToday = String(a.scheduled_time || '').slice(0, 10) === todayStr
+          if (!isToday) return false
           if (doctorId == null) return true
           return Number(a.doctor_id) === Number(doctorId)
         })
@@ -123,18 +126,15 @@ export default function DoctorQueuePage() {
           if ((mappedFromQueue?.length ?? 0) === 0 && doctorId != null) {
             const todayStr = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
             const todaysForDoctor = (appts || []).filter((a: any) => {
-              return Number(a.doctor_id) === Number(doctorId) && String(a.scheduled_time || '').slice(0,10) === todayStr
+              // Only appointments scheduled for today
+              return String(a.scheduled_time || '').slice(0,10) === todayStr && Number(a.doctor_id) === Number(doctorId)
             })
             const active = todaysForDoctor.filter((a: any) => {
               const s = String(a.status || '').toLowerCase()
               return s === 'pending' || s === 'scheduled' || s === 'called' || s === 'in-consultation'
             })
-            // If none for today (timezone or data entry), use all appointments for this doctor regardless of date
-            const source = active.length > 0 ? active : (appts || []).filter((a: any) => {
-              if (Number(a.doctor_id) !== Number(doctorId)) return false
-              const s = String(a.status || '').toLowerCase()
-              return s === 'pending' || s === 'scheduled' || s === 'called' || s === 'in-consultation'
-            })
+            // Only use today's appointments; if none, show empty list (no fallback to other dates)
+            const source = active
             // sort by queue_number then scheduled_time
             source.sort((a: any, b: any) => {
               const qa = a.queue_number ?? Number.MAX_SAFE_INTEGER
@@ -169,12 +169,14 @@ export default function DoctorQueuePage() {
   }, [user?.email, user?.name])
 
   const filteredQueue = useMemo(() => {
-    return queue.filter(
-      (patient) =>
-        patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        patient.reason.toLowerCase().includes(searchTerm.toLowerCase()),
-    )
+    const q = (queue || [])
+    const term = String(searchTerm || '').toLowerCase()
+    return q.filter((patient) => {
+      const name = String(patient?.name || '').toLowerCase()
+      const id = String(patient?.id || '').toLowerCase()
+      const reason = String(patient?.reason || '').toLowerCase()
+      return name.includes(term) || id.includes(term) || reason.includes(term)
+    })
   }, [queue, searchTerm])
 
   const handleMarkComplete = async (id: string) => {
@@ -324,7 +326,7 @@ export default function DoctorQueuePage() {
               <tbody>
                 {filteredQueue.length > 0 ? (
                   filteredQueue.map((patient) => (
-                    <tr key={patient.id} className="border-b hover:bg-gray-50">
+                    <tr key={`${patient.appointmentId}-${patient.id}`} className="border-b hover:bg-gray-50">
                       <td className="py-3 px-4">
                         <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded text-gray-700">
                           {patient.id}

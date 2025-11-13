@@ -208,6 +208,22 @@ export default function ReceptionistAppointmentsPage() {
           alert(raw || 'Failed to update appointment time')
           return
         }
+        // Update status as well
+        try {
+          const statusToSend = appointmentStatus === 'confirmed' ? 'pending' : appointmentStatus
+          const resS = await fetch(`/api/php/appointments/status?id=${encodeURIComponent(editingId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: statusToSend })
+          })
+          if (!resS.ok) {
+            const rawS = await resS.text()
+            console.error('status update failed', resS.status, rawS)
+            alert(rawS || 'Failed to update status')
+          }
+        } catch (e) {
+          console.error('status update error', e)
+        }
         // Optimistic UI update
         setAppointments((prev) =>
           prev.map((apt) =>
