@@ -123,7 +123,7 @@ export default function DoctorDashboard() {
         const completedToday = todaysAppts.filter((a) => (a.status || "").toLowerCase() === "completed")
         const inQueue = todaysAppts.filter((a) => (a.status || "").toLowerCase() !== "completed")
 
-        // Compute stats for top cards
+        // Compute stats for top cards (based on today only)
         const newStats: TodayStats = {
           totalPatients: todaysAppts.length,
           servedToday: completedToday.length,
@@ -154,24 +154,29 @@ export default function DoctorDashboard() {
           }
         }
 
-        // Map to Consultation model for all today's appointments (completed, pending, cancelled)
-        const mapped: Consultation[] = (todaysAppts || [])
+        // Build source for Today's Consultations list: prefer today's appts; if none, fall back to all appts for this doctor
+        const doctorApptsAll = (appts || []).filter((a) => Number(a.doctor_id) === Number(doctorId))
+        const sourceForList = (todaysAppts && todaysAppts.length > 0) ? todaysAppts : doctorApptsAll
+
+        // Map to Consultation model (we will later filter to completed/cancelled in the view)
+        const mapped: Consultation[] = (sourceForList || [])
           .slice()
           .sort((a, b) => (a.scheduled_time || "").localeCompare(b.scheduled_time || ""))
           .map((a) => {
-            const time = new Date(a.scheduled_time)
-            const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            const status = String(a.status || '').toLowerCase()
+            const time = a.scheduled_time ? new Date(a.scheduled_time) : null
+            const timeStr = time ? time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+            const s = String(a.status || '').toLowerCase()
+            const normalized = (s === 'completed' || s === 'pending' || s === 'cancelled' || s === 'canceled') ? (s === 'canceled' ? 'cancelled' : s) : 'pending'
             return {
               id: String(a.appointment_id),
               name: a.patient_name || `PID:${a.patient_id}`,
               time: timeStr,
-              status: (status === 'completed' || status === 'pending' || status === 'cancelled') ? status : 'pending',
-              duration: status === 'completed' ? 15 : undefined, // if you later store durations, compute accordingly
+              status: normalized,
+              duration: normalized === 'completed' ? 15 : undefined, // if you later store durations, compute accordingly
               queueNumber: a.queue_number ?? undefined,
             }
           })
-          .filter((c) => c.status === 'completed' || c.status === 'pending' || c.status === 'cancelled')
+          .filter((c) => c.status === 'completed' || c.status === 'cancelled')
         if (!cancelled) {
           setConsultations(mapped)
           setStats(newStats)
