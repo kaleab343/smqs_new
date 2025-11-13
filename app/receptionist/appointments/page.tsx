@@ -79,6 +79,20 @@ export default function ReceptionistAppointmentsPage() {
     console.log("[v0] Creating new appointment")
     if (patientName && (doctorId || doctorName) && appointmentDate && appointmentTime) {
       try {
+        // Front-end guard: disallow past date/time
+        try {
+          const sel = new Date(`${appointmentDate}T${appointmentTime}:00`)
+          const now = new Date()
+          if (!(sel instanceof Date) || isNaN(sel.getTime())) {
+            alert('Please select a valid date and time')
+            return
+          }
+          if (sel.getTime() < now.getTime()) {
+            alert('Cannot schedule an appointment in the past')
+            return
+          }
+        } catch { /* noop */ }
+
         // Front-end guard: if patientEmail belongs to a user with doctor role, block
         if (patientEmail) {
           try {
@@ -436,6 +450,7 @@ export default function ReceptionistAppointmentsPage() {
               <input
                 type="date"
                 value={appointmentDate}
+                min={new Date().toISOString().slice(0,10)}
                 onChange={(e) => setAppointmentDate(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
@@ -445,6 +460,7 @@ export default function ReceptionistAppointmentsPage() {
               <input
                 type="time"
                 value={appointmentTime}
+                min={appointmentDate === new Date().toISOString().slice(0,10) ? new Date().toTimeString().slice(0,5) : undefined}
                 onChange={(e) => setAppointmentTime(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
@@ -516,6 +532,7 @@ export default function ReceptionistAppointmentsPage() {
               <input
                 type="date"
                 value={appointmentDate}
+                min={new Date().toISOString().slice(0,10)}
                 onChange={(e) => setAppointmentDate(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
@@ -525,6 +542,7 @@ export default function ReceptionistAppointmentsPage() {
               <input
                 type="time"
                 value={appointmentTime}
+                min={appointmentDate === new Date().toISOString().slice(0,10) ? new Date().toTimeString().slice(0,5) : undefined}
                 onChange={(e) => setAppointmentTime(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
               />

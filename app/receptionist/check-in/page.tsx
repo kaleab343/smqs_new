@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Search, X } from "lucide-react"
+import { Search, X, Plus } from "lucide-react"
 
 interface CheckedInPatient {
   id: string
@@ -23,7 +23,6 @@ export default function ReceptionistCheckInPage() {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
-    phone: "",
     reason: "",
   })
 
@@ -107,18 +106,25 @@ export default function ReceptionistCheckInPage() {
     }
 
     setPatients([...patients, newPatient])
-    setFormData({ name: "", email: "", phone: "", reason: "" })
+    setFormData({ name: "", email: "", reason: "" })
     setShowCheckInModal(false)
     console.log("[v0] Patient checked in:", newPatient)
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Patient Check-in</h1>
           <p className="text-gray-600 mt-1">Manage patient check-ins and queue</p>
         </div>
+        <Button
+          className="bg-amber-600 hover:bg-amber-700 flex items-center gap-2"
+          onClick={handleCheckIn}
+        >
+          <Plus className="w-4 h-4" />
+          Check In
+        </Button>
       </div>
 
       {/* Search */}
@@ -203,7 +209,7 @@ export default function ReceptionistCheckInPage() {
       </Card>
 
       {showCheckInModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 backdrop-blur-md bg-black/20 flex items-center justify-center z-50">
           <Card className="w-full max-w-md">
             <CardHeader className="flex items-center justify-between">
               <div>
@@ -230,14 +236,6 @@ export default function ReceptionistCheckInPage() {
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   placeholder="Enter email address"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-                <Input
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="Enter phone number"
                 />
               </div>
               <div>

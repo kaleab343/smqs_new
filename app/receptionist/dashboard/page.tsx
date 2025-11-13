@@ -23,7 +23,31 @@ export default function ReceptionistDashboard() {
 
   const [upcomingAppointments, setUpcomingAppointments] = useState<Array<{ id: string; patient: string; time: string; doctor: string; status: string }>>([])
 
+  const [checkedInToday, setCheckedInToday] = useState<number>(0)
+  const [waitingNow, setWaitingNow] = useState<number>(0)
+  const [completedToday, setCompletedToday] = useState<number>(0)
+
   useEffect(() => {
+    const loadCheckedInToday = async () => {
+      try {
+        const res = await fetch('/api/php/appointments', { cache: 'no-store' })
+        if (!res.ok) return
+        const rows = await res.json().catch(() => [])
+        if (!Array.isArray(rows)) return
+        const today = new Date()
+        const isSameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+        let count = 0
+        for (const r of rows) {
+          const st = String(r.scheduled_time || '')
+          const dt = new Date(st.replace(' ', 'T'))
+          if (isSameDay(today, dt)) count++
+        }
+        setCheckedInToday(count)
+      } catch (e) {
+        console.warn('load checked-in today failed', e)
+      }
+    }
+
     const toTime = (scheduled: string) => {
       const s = (scheduled || '').replace('T', ' ')
       const timePart = (s.split(' ')[1] || '').slice(0,5)
@@ -37,6 +61,48 @@ export default function ReceptionistDashboard() {
       } catch {}
       return timePart || '—'
     }
+    const loadWaitingNow = async () => {
+      try {
+        const res = await fetch('/api/php/appointments', { cache: 'no-store' })
+        if (!res.ok) return
+        const rows = await res.json().catch(() => [])
+        if (!Array.isArray(rows)) return
+        const today = new Date()
+        const isSameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+        let count = 0
+        for (const r of rows) {
+          const status = String(r.status || '').toLowerCase()
+          const st = String(r.scheduled_time || '')
+          const dt = new Date(st.replace(' ', 'T'))
+          if (status === 'waiting' && isSameDay(today, dt)) count++
+        }
+        setWaitingNow(count)
+      } catch (e) {
+        console.warn('load waiting now failed', e)
+      }
+    }
+
+    const loadCompletedToday = async () => {
+      try {
+        const res = await fetch('/api/php/appointments', { cache: 'no-store' })
+        if (!res.ok) return
+        const rows = await res.json().catch(() => [])
+        if (!Array.isArray(rows)) return
+        const today = new Date()
+        const isSameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+        let count = 0
+        for (const r of rows) {
+          const status = String(r.status || '').toLowerCase()
+          const st = String(r.scheduled_time || '')
+          const dt = new Date(st.replace(' ', 'T'))
+          if ((status === 'completed' || status === 'done' || status === 'served') && isSameDay(today, dt)) count++
+        }
+        setCompletedToday(count)
+      } catch (e) {
+        console.warn('load completed today failed', e)
+      }
+    }
+
     const load = async () => {
       try {
         const res = await fetch('/api/php/appointments', { cache: 'no-store' })
@@ -64,6 +130,9 @@ export default function ReceptionistDashboard() {
         setUpcomingAppointments([])
       }
     }
+    loadCheckedInToday()
+    loadWaitingNow()
+    loadCompletedToday()
     load()
   }, [])
 
@@ -75,13 +144,13 @@ export default function ReceptionistDashboard() {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600">Checked In Today</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-gray-900">{metrics.checkedInToday}</div>
+            <div className="text-3xl font-bold text-gray-900">{checkedInToday}</div>
           </CardContent>
         </Card>
 
@@ -90,7 +159,7 @@ export default function ReceptionistDashboard() {
             <CardTitle className="text-sm font-medium text-gray-600">Waiting Now</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{metrics.waitingNow}</div>
+            <div className="text-3xl font-bold text-blue-600">{waitingNow}</div>
           </CardContent>
         </Card>
 
@@ -99,18 +168,10 @@ export default function ReceptionistDashboard() {
             <CardTitle className="text-sm font-medium text-gray-600">Completed Today</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-emerald-600">{metrics.completedToday}</div>
+            <div className="text-3xl font-bold text-emerald-600">{completedToday}</div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Avg Wait Time</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-orange-600">{metrics.avgWaitTime} min</div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Quick Actions */}

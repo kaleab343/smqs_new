@@ -90,6 +90,14 @@ class AppointmentsController
             if (!$normalizedTime) {
                 return Response::json(['error' => 'Invalid scheduled_time format'], 400);
             }
+            // Disallow scheduling in the past (date or time before now)
+            try {
+                $now = new DateTime('now');
+                $sel = new DateTime($normalizedTime);
+                if ($sel < $now) {
+                    return Response::json(['error' => 'Cannot schedule an appointment in the past'], 400);
+                }
+            } catch (Throwable $e) { /* ignore parse errors already handled */ }
 
             // Validate doctor exists
             $doctorsTbl = Database::table('doctors');
@@ -136,6 +144,15 @@ class AppointmentsController
                         $patients = new PatientModel();
                         $existing = $patients->findByEmail($patientEmail);
                         if ($existing && isset($existing['patient_id'])) {
+                            // If a patient exists with this email, ensure provided name matches the stored name
+                            if ($patientName !== '') {
+                                $provided = strtolower(trim($patientName));
+                                $stored = strtolower(trim((string)($existing['name'] ?? '')));
+                                if ($stored !== '' && $provided !== '' && $provided !== $stored) {
+                                    $pdo->rollBack();
+                                    return Response::json(['error' => 'Provided name does not match existing patient for this email'], 400);
+                                }
+                            }
                             $patient_id = (int)$existing['patient_id'];
                         }
                     }
