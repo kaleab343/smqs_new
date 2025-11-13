@@ -93,7 +93,7 @@ class AppointmentsController
 
             // Validate doctor exists
             $doctorsTbl = Database::table('doctors');
-            $stmt = $pdo->prepare("SELECT doctor_id FROM {$doctorsTbl} WHERE doctor_id = :id LIMIT 1");
+            $stmt = $pdo->prepare("SELECT doctor_id, status FROM {$doctorsTbl} WHERE doctor_id = :id LIMIT 1");
             $stmt->execute([':id' => $doctor_id]);
             $docRow = $stmt->fetch();
             if (!$docRow) {
@@ -206,7 +206,15 @@ class AppointmentsController
                 $appointments = new AppointmentModel();
                 $queue = new QueueModel();
                 $queueNum = $queue->nextQueueNumber();
-                $appointment_id = $appointments->create($patient_id, $doctor_id, $normalizedTime, 'pending', $queueNum);
+                // If the doctor is currently assigned to other patients (has active queue/appointments), and we auto-created this patient,
+// then mark this new appointment as 'waiting'; otherwise leave as 'pending'.
+$apptTbl = Database::table('appointments');
+$stmtBusy = $pdo->prepare("SELECT COUNT(1) AS c FROM {$apptTbl} WHERE doctor_id = :did AND status IN ('pending','called','in-consultation')");
+$stmtBusy->execute([':did' => $doctor_id]);
+$busyCount = (int)($stmtBusy->fetch()['c'] ?? 0);
+$doctorBusy = $busyCount > 0;
+$initialStatus = $doctorBusy ? 'waiting' : 'pending';
+$appointment_id = $appointments->create($patient_id, $doctor_id, $normalizedTime, $initialStatus, $queueNum);
                 $queue->enqueue($appointment_id, $queueNum, null);
 
                 $pdo->commit();
@@ -214,7 +222,7 @@ class AppointmentsController
                     'appointment_id' => $appointment_id,
                     'queue_number' => $queueNum,
                     'scheduled_time' => $normalizedTime,
-                    'status' => 'pending',
+                    'status' => $initialStatus,
                     'patient_id' => $patient_id,
                     'auto_created_patient' => $autoCreatedPatient,
                 ], 201);

@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Search, Plus, X } from "lucide-react"
+import { Search, X } from "lucide-react"
 
 interface CheckedInPatient {
   id: string
@@ -119,10 +119,6 @@ export default function ReceptionistCheckInPage() {
           <h1 className="text-3xl font-bold text-gray-900">Patient Check-in</h1>
           <p className="text-gray-600 mt-1">Manage patient check-ins and queue</p>
         </div>
-        <Button className="bg-amber-600 hover:bg-amber-700" onClick={handleCheckIn}>
-          <Plus className="w-4 h-4 mr-2" />
-          Check In Patient
-        </Button>
       </div>
 
       {/* Search */}
