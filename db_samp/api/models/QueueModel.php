@@ -2,6 +2,49 @@
 require_once __DIR__ . '/../core/Database.php';
 
 class QueueModel {
+    /**
+     * Promote the next queued appointment for a given doctor to the front (position=1)
+     * and set its appointment status to 'in-consultation'. Returns the appointment_id promoted or null.
+     */
+    public function promoteNextForDoctor(int $doctor_id): ?int {
+        $apptTbl = Database::table('appointments');
+        $queueTbl = Database::table('queue');
+        $this->db->beginTransaction();
+        try {
+            // Find the next queued appointment for this doctor by smallest position
+            $sql = "SELECT q.appointment_id
+                    FROM {$queueTbl} q
+                    JOIN {$apptTbl} a ON a.appointment_id = q.appointment_id
+                    WHERE a.doctor_id = :did
+                    ORDER BY q.position ASC
+                    LIMIT 1";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([':did' => $doctor_id]);
+            $row = $stmt->fetch();
+            if (!$row || !isset($row['appointment_id'])) {
+                $this->db->commit();
+                return null; // nothing to promote
+            }
+            $nextAid = (int)$row['appointment_id'];
+
+            // Move this appointment to the front of the queue
+            $this->db->exec("UPDATE {$queueTbl} SET position = position + 1");
+            $stmt = $this->db->prepare("UPDATE {$queueTbl} SET position = 1 WHERE appointment_id = :aid");
+            $stmt->execute([':aid' => $nextAid]);
+
+            // Mark the appointment as in-consultation
+            $stmt = $this->db->prepare("UPDATE {$apptTbl} SET status = 'in-consultation' WHERE appointment_id = :aid");
+            $stmt->execute([':aid' => $nextAid]);
+
+            $this->db->commit();
+            return $nextAid;
+        } catch (Throwable $e) {
+            $this->db->rollBack();
+            throw $e;
+        }
+    }
+
+
     private PDO $db;
 
     public function __construct() {

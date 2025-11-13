@@ -289,10 +289,25 @@ $appointment_id = $appointments->create($patient_id, $doctor_id, $normalizedTime
         try {
             $appointments = new AppointmentModel();
             $queue = new QueueModel();
+            // Look up doctor_id for this appointment
+            $pdo = Database::getConnection();
+            $apptTbl = Database::table('appointments');
+            $stmt = $pdo->prepare("SELECT doctor_id FROM {$apptTbl} WHERE appointment_id = :id LIMIT 1");
+            $stmt->execute([':id' => $id]);
+            $row = $stmt->fetch();
+            $doctor_id = $row && isset($row['doctor_id']) ? (int)$row['doctor_id'] : null;
+
             // Update status to completed and remove from queue
             $ok = $this->updateStatus($id, 'completed');
             $queue->removeByAppointment($id);
-            return Response::json(['success' => (bool)$ok, 'appointment_id' => $id, 'status' => 'completed']);
+
+            // Auto-assign next patient to this doctor
+            $promoted = null;
+            if ($doctor_id) {
+                try { $promoted = $queue->promoteNextForDoctor($doctor_id); } catch (Throwable $e) { /* log if needed */ }
+            }
+
+            return Response::json(['success' => (bool)$ok, 'appointment_id' => $id, 'status' => 'completed', 'next_assigned' => $promoted]);
         } catch (Throwable $e) {
             return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
         }
@@ -342,11 +357,23 @@ $appointment_id = $appointments->create($patient_id, $doctor_id, $normalizedTime
 
             $ok = $this->updateStatus($id, $status);
 
+            $promoted = null;
             if (in_array($status, ['completed','cancelled'], true)) {
                 $queue = new QueueModel();
+                // look up doctor_id first
+                $pdo = Database::getConnection();
+                $apptTbl = Database::table('appointments');
+                $stmt = $pdo->prepare("SELECT doctor_id FROM {$apptTbl} WHERE appointment_id = :id LIMIT 1");
+                $stmt->execute([':id' => $id]);
+                $row = $stmt->fetch();
+                $doctor_id = $row && isset($row['doctor_id']) ? (int)$row['doctor_id'] : null;
+
                 $queue->removeByAppointment($id);
+                if ($doctor_id) {
+                    try { $promoted = $queue->promoteNextForDoctor($doctor_id); } catch (Throwable $e) { /* ignore */ }
+                }
             }
-            return Response::json(['success' => (bool)$ok, 'appointment_id' => $id, 'status' => $status]);
+            return Response::json(['success' => (bool)$ok, 'appointment_id' => $id, 'status' => $status, 'next_assigned' => $promoted]);
         } catch (Throwable $e) {
             return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
         }
