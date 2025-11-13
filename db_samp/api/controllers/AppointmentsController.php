@@ -38,12 +38,11 @@ class AppointmentsController
         if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $t)) {
             $t .= ':00';
         }
-        try {
-            $dt = new DateTime($t);
-            return $dt->format('Y-m-d H:i:s');
-        } catch (Throwable $e) {
-            return null;
+        // Accept exactly 'YYYY-MM-DD HH:MM:SS' and return as-is to preserve user selection
+        if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $t)) {
+            return $t;
         }
+        return null;
     }
 
     public function list()

@@ -13,16 +13,21 @@ interface CheckedInPatient {
   email: string
   checkinTime: string
   status: "waiting" | "in-consultation" | "completed"
+  department?: string
 }
 
 export default function ReceptionistCheckInPage() {
   const [patients, setPatients] = useState<CheckedInPatient[]>([])
+  const [doctors, setDoctors] = useState<Array<{ doctor_id: number; name: string; specialization?: string; status?: string }>>([])
+  const [loadingDoctors, setLoadingDoctors] = useState(false)
 
   const [searchTerm, setSearchTerm] = useState("")
   const [showCheckInModal, setShowCheckInModal] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
     email: "",
+    doctorId: "" as number | "",
+    doctorName: "",
     reason: "",
   })
 
@@ -65,6 +70,26 @@ export default function ReceptionistCheckInPage() {
     }
     load()
   }, [])
+
+ useEffect(() => {
+   if (showCheckInModal) {
+     const run = async () => {
+       try {
+         setLoadingDoctors(true)
+         const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "").trim() || "http://127.0.0.1/code_(1)/db_samp/api/index.php"
+         const url = `${base}?r=/doctors`
+         const res = await fetch(url)
+         const data = await res.json()
+         if (Array.isArray(data)) setDoctors(data.filter((d: any) => String(d.status || 'ACTIVE').toUpperCase() === 'ACTIVE'))
+       } catch (e) {
+         console.error("Failed to load doctors", e)
+       } finally {
+         setLoadingDoctors(false)
+       }
+     }
+     run()
+   }
+ }, [showCheckInModal])
 
   const filteredPatients = patients.filter(
     (p) =>
@@ -237,6 +262,28 @@ export default function ReceptionistCheckInPage() {
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   placeholder="Enter email address"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Doctor</label>
+                <select
+                  value={String(formData.doctorId)}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    const num = val ? Number(val) : ""
+                    const d = doctors.find((x) => String(x.doctor_id) === val)
+                    setFormData({ ...formData, doctorId: num as any, doctorName: d?.name || "" })
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  <option value="">{loadingDoctors ? 'Loading doctors...' : (formData.department ? 'Select a doctor' : 'Select a department first')}</option>
+                  {doctors
+                    .filter((d) => !formData.department || d.specialization === formData.department)
+                    .map((d) => (
+                      <option key={d.doctor_id} value={d.doctor_id}>
+                        {d.name}{d.specialization ? ` (${d.specialization})` : ''}
+                      </option>
+                    ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Reason for Visit</label>
