@@ -22,7 +22,7 @@ class QueueModel {
                     FROM {$apptTbl} a
                     LEFT JOIN {$queueTbl} q ON q.appointment_id = a.appointment_id
                     WHERE q.appointment_id IS NULL AND (a.status = 'pending' OR a.status = 'scheduled')
-                    ORDER BY a.scheduled_time ASC, a.created_at ASC, a.appointment_id ASC";
+                    ORDER BY a.scheduled_time ASC, a.appointment_id ASC";
             $missing = $this->db->query($sql)->fetchAll();
             if (!$missing) {
                 $this->db->commit();
@@ -33,8 +33,9 @@ class QueueModel {
             foreach ($missing as $row) {
                 $aid = (int)$row['appointment_id'];
                 $qnum = $this->nextQueueNumber();
-                // Use enqueue to apply ordering logic
-                $this->enqueue($aid, $qnum, null);
+                $pos = $this->getLastPosition();
+                $stmt = $this->db->prepare("INSERT INTO {$queueTbl} (appointment_id, queue_number, position) VALUES (:aid, :qnum, :pos)");
+                $stmt->execute([':aid' => $aid, ':qnum' => $qnum, ':pos' => $pos]);
                 $enqueued++;
             }
 
@@ -80,63 +81,12 @@ class QueueModel {
      * Enqueue an appointment at the tail of the queue (unless position is provided).
      * Returns the created queue_id.
      */
-    /**
-     * Enqueue with ordering logic:
-     * - If position provided, use it.
-     * - Otherwise, insert according to today's scheduled_time ascending, then created_at ascending.
-     *   Walk-ins checked in now (scheduled_time ~ now) go to the bottom relative to earlier scheduled times.
-     */
     public function enqueue(int $appointment_id, ?int $queue_number = null, ?int $position = null): int {
         if ($queue_number === null) {
             $queue_number = $this->nextQueueNumber();
         }
-
-        // If caller specifies a position, honor it
-        if ($position !== null) {
-            $tbl = Database::table('queue');
-            $stmt = $this->db->prepare(
-                "INSERT INTO {$tbl} (appointment_id, queue_number, position) VALUES (:aid, :qnum, :pos)"
-            );
-            $stmt->execute([
-                ':aid'  => $appointment_id,
-                ':qnum' => $queue_number,
-                ':pos'  => $position,
-            ]);
-            return (int)$this->db->lastInsertId();
-        }
-
-        // Determine target position based on ordering by scheduled_time, then created_at
-        $apptTbl = Database::table('appointments');
-        $queueTbl = Database::table('queue');
-
-        // Fetch the appointment details
-        $stmt = $this->db->prepare("SELECT scheduled_time, created_at FROM {$apptTbl} WHERE appointment_id = :aid LIMIT 1");
-        $stmt->execute([':aid' => $appointment_id]);
-        $appt = $stmt->fetch();
-        if (!$appt) {
-            // Fallback to append if not found
+        if ($position === null) {
             $position = $this->getLastPosition();
-        } else {
-            $scheduled = $appt['scheduled_time'];
-            $created = $appt['created_at'];
-
-            // Count how many existing queue entries have strictly earlier ordering
-            $sql = "SELECT COUNT(*) AS cnt
-                    FROM {$queueTbl} q
-                    JOIN {$apptTbl} a ON a.appointment_id = q.appointment_id
-                    WHERE DATE(a.scheduled_time) = DATE(:sched)
-                      AND (a.scheduled_time < :sched
-                           OR (a.scheduled_time = :sched AND a.created_at <= :created))";
-            $stmt = $this->db->prepare($sql);
-            $stmt->execute([':sched' => $scheduled, ':created' => $created]);
-            $countEarlier = (int)($stmt->fetch()['cnt'] ?? 0);
-
-            // Insert after the last earlier/equal entry -> shift positions >= target by 1
-            $targetPos = $countEarlier + 1;
-            $tbl = Database::table('queue');
-            $stmtShift = $this->db->prepare("UPDATE {$tbl} SET position = position + 1 WHERE position >= :pos");
-            $stmtShift->execute([':pos' => $targetPos]);
-            $position = $targetPos;
         }
 
         $tbl = Database::table('queue');
