@@ -56,6 +56,16 @@ export default function ReceptionistAppointmentsPage() {
 
   const [showNewModal, setShowNewModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
+
+  const resetNewAppointmentForm = () => {
+    setPatientName("")
+    setPatientEmail("")
+    setDoctorName("")
+    setDoctorId("")
+    setAppointmentDate("")
+    setAppointmentTime("")
+    setAppointmentStatus("pending")
+  }
   const [editingId, setEditingId] = useState<string | null>(null)
   const [patientName, setPatientName] = useState("")
   const [patientEmail, setPatientEmail] = useState("")
@@ -110,10 +120,13 @@ export default function ReceptionistAppointmentsPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         })
-        const body = await res.json().catch(() => null)
+        const rawText = await res.text()
+        let body: any = null
+        try { body = rawText ? JSON.parse(rawText) : null } catch { body = null }
         if (!res.ok) {
-          console.error('Create appointment failed', res.status, body)
-          alert(body?.error || 'Failed to create appointment')
+          const msg = (body && (body.error || body.message)) || (rawText || 'Failed to create appointment')
+          console.warn('Create appointment failed', res.status, msg)
+          alert(String(msg))
           return
         }
         const apptId = String(body?.appointment_id ?? Date.now())
@@ -124,7 +137,7 @@ export default function ReceptionistAppointmentsPage() {
           doctor: doctors.find((d) => d.doctor_id === (payload.doctor_id as number))?.name || doctorName || '',
           date: appointmentDate,
           time: appointmentTime,
-          status: 'pending',
+          status: (body?.status as any) || 'pending',
         }
         // Update UI and refetch from server to ensure consistency
         setAppointments([newAppointment, ...appointments])
@@ -267,7 +280,7 @@ export default function ReceptionistAppointmentsPage() {
         </div>
         <Button
           className="bg-amber-600 hover:bg-amber-700 flex items-center gap-2"
-          onClick={() => setShowNewModal(true)}
+          onClick={() => { resetNewAppointmentForm(); setShowNewModal(true) }}
         >
           <Plus className="w-4 h-4" />
           New Appointment
@@ -371,7 +384,7 @@ export default function ReceptionistAppointmentsPage() {
       </Card>
 
       {/* New Appointment Modal */}
-      <Dialog open={showNewModal} onOpenChange={setShowNewModal}>
+      <Dialog open={showNewModal} onOpenChange={(open) => { if (!open) resetNewAppointmentForm(); setShowNewModal(open) }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create New Appointment</DialogTitle>

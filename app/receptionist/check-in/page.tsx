@@ -50,7 +50,7 @@ export default function ReceptionistCheckInPage() {
         const body = await res.json().catch(() => [])
         if (!Array.isArray(body)) { setPatients([]); return }
         const mapped: CheckedInPatient[] = body
-          .filter((r: any) => ['pending','called','in-consultation'].includes(String(r.status || '')))
+          .filter((r: any) => ['waiting','pending','called','in-consultation'].includes(String(r.status || '')))
           .map((r: any) => ({
             id: String(r.appointment_id ?? ''),
             name: String(r.patient_name || r.patient_id || ''),
