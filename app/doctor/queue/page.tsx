@@ -95,29 +95,69 @@ export default function DoctorQueuePage() {
           apptById.set(Number(a.appointment_id), a)
         }
 
-        // Filter queue by assigned doctor (if doctorId known); otherwise show none
+        // Filter queue by assigned doctor (if doctorId known); otherwise include all
         const filtered = (q || []).filter((row: any) => {
           const a = apptById.get(Number(row.appointment_id))
-          if (!a) return false
-          if (doctorId == null) return false
+          if (!a) return doctorId == null // include when we can't resolve appointment details and no doctor filter
+          if (doctorId == null) return true
           return Number(a.doctor_id) === Number(doctorId)
         })
 
         // Map to UI model; fallbacks for missing fields
-        const mapped: QueuedPatient[] = filtered.map((row: any) => {
+        const mappedFromQueue: QueuedPatient[] = filtered.map((row: any) => {
           const a = apptById.get(Number(row.appointment_id)) || {}
           const appointmentId = Number(a.appointment_id || row.appointment_id)
           const id = String(a.queue_number ?? row.queue_number ?? appointmentId ?? row.queue_id)
           const name = a.patient_name || `PID:${a.patient_id ?? "?"}`
           const reason = a.specialization || "Appointment"
-          const position = Number(row.position || 0)
+          const position = Number(row.position || 0) || Number(a.queue_number || 0) || 0
           // Wait time estimate: (position-1) * 15 min
           const waitTime = Math.max(0, (position - 1) * 15)
           const status: QueuedPatient["status"] = position === 1 ? "in-consultation" : "waiting"
           return { id, appointmentId, position, name, reason, waitTime, status }
         })
 
-        if (!cancelled) setQueue(mapped)
+        // Fallback: if no queue rows, derive queue from today's pending/scheduled appointments for this doctor
+        let finalList: QueuedPatient[] = mappedFromQueue
+        try {
+          if ((mappedFromQueue?.length ?? 0) === 0 && doctorId != null) {
+            const todayStr = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
+            const todaysForDoctor = (appts || []).filter((a: any) => {
+              return Number(a.doctor_id) === Number(doctorId) && String(a.scheduled_time || '').slice(0,10) === todayStr
+            })
+            const active = todaysForDoctor.filter((a: any) => {
+              const s = String(a.status || '').toLowerCase()
+              return s === 'pending' || s === 'scheduled' || s === 'called' || s === 'in-consultation'
+            })
+            // If none for today (timezone or data entry), use all appointments for this doctor regardless of date
+            const source = active.length > 0 ? active : (appts || []).filter((a: any) => {
+              if (Number(a.doctor_id) !== Number(doctorId)) return false
+              const s = String(a.status || '').toLowerCase()
+              return s === 'pending' || s === 'scheduled' || s === 'called' || s === 'in-consultation'
+            })
+            // sort by queue_number then scheduled_time
+            source.sort((a: any, b: any) => {
+              const qa = a.queue_number ?? Number.MAX_SAFE_INTEGER
+              const qb = b.queue_number ?? Number.MAX_SAFE_INTEGER
+              if (qa !== qb) return qa - qb
+              return String(a.scheduled_time || '').localeCompare(String(b.scheduled_time || ''))
+            })
+            finalList = source.map((a: any, idx: number) => {
+              const appointmentId = Number(a.appointment_id)
+              const position = (a.queue_number && Number(a.queue_number) > 0) ? Number(a.queue_number) : (idx + 1)
+              const id = String(a.queue_number ?? appointmentId)
+              const name = a.patient_name || `PID:${a.patient_id ?? '?'}`
+              const reason = a.specialization || a.reason || 'Appointment'
+              const waitTime = Math.max(0, (position - 1) * 15)
+              // Reflect status if available, otherwise derive from position
+              const s = String(a.status || '').toLowerCase()
+              const status: QueuedPatient["status"] = (s === 'called' || s === 'in-consultation') ? (s as any) : (position === 1 ? 'in-consultation' : 'waiting')
+              return { id, appointmentId, position, name, reason, waitTime, status }
+            })
+          }
+        } catch {}
+
+        if (!cancelled) setQueue(finalList)
       } catch (e: any) {
         if (!cancelled) setError(e?.message || "Failed to load queue")
       } finally {
