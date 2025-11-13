@@ -76,6 +76,7 @@ $router->add('POST', '/users/{id}/delete', fn($id) => $auth->deleteUser((int)$id
 // Queue
 $router->add('GET', '/queue', fn() => $queue->list());
 $router->add('POST', '/queue/emergency', fn() => $queue->emergency());
+$router->add('POST', '/queue/backfill', fn() => $queue->backfill());
 
 // Admin stats
 $router->add('GET', '/admin/activities', function () {

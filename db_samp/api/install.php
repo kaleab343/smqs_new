@@ -59,6 +59,29 @@ try {
     $tables = [];
     foreach ($pdo->query('SHOW TABLES') as $row) { $tables[] = array_values($row)[0]; }
     echo "Tables: " . implode(', ', $tables) . "\n";
+
+    // Create trigger to auto-enqueue appointments inserted outside API
+    try {
+        $pdo->exec("DROP TRIGGER IF EXISTS trg_appointments_after_insert");
+        $pdo->exec(<<<SQL
+CREATE TRIGGER trg_appointments_after_insert
+AFTER INSERT ON appointments
+FOR EACH ROW
+BEGIN
+  DECLARE next_q INT;
+  DECLARE next_pos INT;
+  SELECT IFNULL(MAX(queue_number), 0) + 1 INTO next_q FROM queue;
+  SELECT IFNULL(MAX(position), 0) + 1 INTO next_pos FROM queue;
+  INSERT INTO queue (appointment_id, queue_number, position)
+  VALUES (NEW.appointment_id,
+          COALESCE(NEW.queue_number, next_q),
+          next_pos);
+END
+SQL);
+        echo "Trigger trg_appointments_after_insert created.\n";
+    } catch (Throwable $te) {
+        echo "Trigger creation skipped/failed: " . $te->getMessage() . "\n";
+    }
 } catch (Throwable $e) {
     http_response_code(500);
     echo "Install error: " . $e->getMessage() . "\n";

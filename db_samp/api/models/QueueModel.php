@@ -9,6 +9,45 @@ class QueueModel {
     }
 
     /**
+     * Backfill: enqueue all appointments in pending/scheduled that are missing from queue.
+     * Returns number of rows enqueued.
+     */
+    public function backfillFromAppointments(): int {
+        $apptTbl = Database::table('appointments');
+        $queueTbl = Database::table('queue');
+        $this->db->beginTransaction();
+        try {
+            // Find all appointment_ids missing from queue with relevant statuses
+            $sql = "SELECT a.appointment_id
+                    FROM {$apptTbl} a
+                    LEFT JOIN {$queueTbl} q ON q.appointment_id = a.appointment_id
+                    WHERE q.appointment_id IS NULL AND (a.status = 'pending' OR a.status = 'scheduled')
+                    ORDER BY a.scheduled_time ASC, a.appointment_id ASC";
+            $missing = $this->db->query($sql)->fetchAll();
+            if (!$missing) {
+                $this->db->commit();
+                return 0;
+            }
+
+            $enqueued = 0;
+            foreach ($missing as $row) {
+                $aid = (int)$row['appointment_id'];
+                $qnum = $this->nextQueueNumber();
+                $pos = $this->getLastPosition();
+                $stmt = $this->db->prepare("INSERT INTO {$queueTbl} (appointment_id, queue_number, position) VALUES (:aid, :qnum, :pos)");
+                $stmt->execute([':aid' => $aid, ':qnum' => $qnum, ':pos' => $pos]);
+                $enqueued++;
+            }
+
+            $this->db->commit();
+            return $enqueued;
+        } catch (Throwable $e) {
+            $this->db->rollBack();
+            throw $e;
+        }
+    }
+
+    /**
      * Get the next global queue number (monotonic).
      */
     public function nextQueueNumber(): int {
