@@ -373,4 +373,18 @@ $appointment_id = $appointments->create($patient_id, $doctor_id, $normalizedTime
             return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
         }
     }
+
+    public function countToday()
+    {
+        try {
+            $pdo = Database::getConnection();
+            $appt = Database::table('appointments');
+            $sql = "SELECT COUNT(*) AS c FROM {$appt} WHERE DATE(scheduled_time) = CURDATE()";
+            $row = $pdo->query($sql)->fetch();
+            $count = (int)($row['c'] ?? 0);
+            return Response::json(['count' => $count]);
+        } catch (Throwable $e) {
+            return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
+        }
+    }
 }

@@ -24,8 +24,8 @@ export default function ReceptionistDashboard() {
   const [upcomingAppointments, setUpcomingAppointments] = useState<Array<{ id: string; patient: string; time: string; doctor: string; status: string }>>([])
 
   const [checkedInToday, setCheckedInToday] = useState<number>(0)
-  const [waitingNow, setWaitingNow] = useState<number>(0)
-  const [completedToday, setCompletedToday] = useState<number>(0)
+  const [waitingToday, setWaitingToday] = useState<number>(0)
+  const [inConsultationToday, setInConsultationToday] = useState<number>(0)
 
   useEffect(() => {
     const loadCheckedInToday = async () => {
@@ -34,14 +34,7 @@ export default function ReceptionistDashboard() {
         if (!res.ok) return
         const rows = await res.json().catch(() => [])
         if (!Array.isArray(rows)) return
-        const today = new Date()
-        const isSameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-        let count = 0
-        for (const r of rows) {
-          const st = String(r.scheduled_time || '')
-          const dt = new Date(st.replace(' ', 'T'))
-          if (isSameDay(today, dt)) count++
-        }
+        const count = rows.filter((r: any) => ['waiting','pending','called','in-consultation'].includes(String(r.status || ''))).length
         setCheckedInToday(count)
       } catch (e) {
         console.warn('load checked-in today failed', e)
@@ -61,28 +54,32 @@ export default function ReceptionistDashboard() {
       } catch {}
       return timePart || '—'
     }
-    const loadWaitingNow = async () => {
+    const loadWaitingToday = async () => {
       try {
         const res = await fetch('/api/php/appointments', { cache: 'no-store' })
         if (!res.ok) return
         const rows = await res.json().catch(() => [])
         if (!Array.isArray(rows)) return
+        // Match Patient Check-in Waiting card method: count all with status === 'waiting' (no date filter)
+        const waiting = rows.filter((r: any) => String(r.status || '').toLowerCase() === 'waiting').length
+        // Keep existing behavior for In Consultation if needed
         const today = new Date()
         const isSameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-        let count = 0
+        let inConsult = 0
         for (const r of rows) {
           const status = String(r.status || '').toLowerCase()
           const st = String(r.scheduled_time || '')
           const dt = new Date(st.replace(' ', 'T'))
-          if (status === 'waiting' && isSameDay(today, dt)) count++
+          if (isSameDay(today, dt) && status === 'in-consultation') inConsult++
         }
-        setWaitingNow(count)
+        setWaitingToday(waiting)
+        setInConsultationToday(inConsult)
       } catch (e) {
         console.warn('load waiting now failed', e)
       }
     }
 
-    const loadCompletedToday = async () => {
+    const loadInConsultationToday = async () => {
       try {
         const res = await fetch('/api/php/appointments', { cache: 'no-store' })
         if (!res.ok) return
@@ -131,8 +128,8 @@ export default function ReceptionistDashboard() {
       }
     }
     loadCheckedInToday()
-    loadWaitingNow()
-    loadCompletedToday()
+    loadWaitingToday()
+    loadInConsultationToday()
     load()
   }, [])
 
@@ -156,19 +153,19 @@ export default function ReceptionistDashboard() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Waiting Now</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-600">Waiting</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{waitingNow}</div>
+            <div className="text-3xl font-bold text-blue-600">{waitingToday}</div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Completed Today</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-600">In Consultation</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-emerald-600">{completedToday}</div>
+            <div className="text-3xl font-bold text-emerald-600">{inConsultationToday}</div>
           </CardContent>
         </Card>
 

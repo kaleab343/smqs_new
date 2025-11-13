@@ -39,6 +39,7 @@ $router->add('GET', '/appointments', fn() => $appt->list());
 $router->add('POST', '/appointments', fn() => $appt->create());
 $router->add('DELETE', '/appointments/{id}', fn($id) => $appt->delete((int)$id));
 $router->add('GET', '/appointments/current', fn() => $appt->current());
+$router->add('GET', '/appointments/today-count', fn() => $appt->countToday());
 // Update only scheduled_time using id from query/body
 $router->add('POST', '/appointments/update-time', function () use ($appt) {
     $id = isset($_GET['id']) ? (int)$_GET['id'] : (int)($_POST['id'] ?? 0);
