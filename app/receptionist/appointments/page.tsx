@@ -190,12 +190,23 @@ export default function ReceptionistAppointmentsPage() {
   const handleSaveEditedAppointment = async () => {
     if (editingId) {
       try {
-        // Update status in DB like Admin Users update pattern
-        const res = await fetch(`/api/php/appointments/status?id=${encodeURIComponent(editingId)}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: appointmentStatus }) })
+        // Build selected date/time string and validate not in the past
+        const scheduled_time = `${appointmentDate} ${appointmentTime}:00`
+        try {
+          const sel = new Date(`${appointmentDate}T${appointmentTime}:00`)
+          if (isNaN(sel.getTime()) || sel.getTime() < Date.now()) {
+            alert('Cannot schedule an appointment in the past')
+            return
+          }
+        } catch {}
+        // Update only scheduled_time using the same id style as delete
+        const res = await fetch(`/api/php/appointments/update-time?id=${encodeURIComponent(editingId)}`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scheduled_time }) })
         if (!res.ok) {
-          const body = await res.json().catch(()=>null)
-          console.error('status update failed', res.status, body)
+          const raw = await res.text()
+          console.error('time update failed', res.status, raw)
+          alert(raw || 'Failed to update appointment time')
+          return
         }
         // Optimistic UI update
         setAppointments((prev) =>

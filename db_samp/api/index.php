@@ -39,6 +39,18 @@ $router->add('GET', '/appointments', fn() => $appt->list());
 $router->add('POST', '/appointments', fn() => $appt->create());
 $router->add('DELETE', '/appointments/{id}', fn($id) => $appt->delete((int)$id));
 $router->add('GET', '/appointments/current', fn() => $appt->current());
+// Update only scheduled_time using id from query/body
+$router->add('POST', '/appointments/update-time', function () use ($appt) {
+    $id = isset($_GET['id']) ? (int)$_GET['id'] : (int)($_POST['id'] ?? 0);
+    if (!$id) return Response::json(['error' => 'missing_id'], 400);
+    return $appt->updateScheduledTime($id);
+});
+// Update appointment using id from query/body (same id style as delete)
+$router->add('POST', '/appointments/update', function () use ($appt) {
+    $id = isset($_GET['id']) ? (int)$_GET['id'] : (int)($_POST['id'] ?? 0);
+    if (!$id) return Response::json(['error' => 'missing_id'], 400);
+    return $appt->update($id);
+});
 // Permissive update route (mirrors users/update) - accepts id in query or body
 $router->add('POST', '/appointments/status', function () use ($appt) {
     $id = isset($_GET['id']) ? (int)$_GET['id'] : (int)($_POST['id'] ?? 0);
