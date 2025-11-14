@@ -21,6 +21,19 @@ export default function AppointmentsPage() {
   const [loadingAppointments, setLoadingAppointments] = useState(false)
   const [appointmentsError, setAppointmentsError] = useState<string | null>(null)
 
+  // Customer Satisfaction (local-only)
+  const [csat, setCsat] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const v = localStorage.getItem('patient-csat')
+      return v ? Number(v) : 0
+    }
+    return 0
+  })
+  const [csatHover, setCsatHover] = useState<number>(0)
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem('patient-csat', String(csat))
+  }, [csat])
+
   const [showBookModal, setShowBookModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -346,6 +359,27 @@ export default function AppointmentsPage() {
           </Card>
         </div>
       )}
+
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-2">
+            <span className="text-gray-700 font-medium">Customer Satisfaction:</span>
+            {[1,2,3,4,5].map((n) => (
+              <button
+                key={n}
+                onMouseEnter={() => setCsatHover(n)}
+                onMouseLeave={() => setCsatHover(0)}
+                onClick={() => setCsat(n)}
+                aria-label={`Rate ${n} star`}
+                className={`text-2xl ${ (csatHover || csat) >= n ? 'text-yellow-500' : 'text-gray-300' }`}
+              >
+                ★
+              </button>
+            ))}
+            <span className="text-sm text-gray-500 ml-2">{csat > 0 ? `${csat}/5` : 'Not rated yet'}</span>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Past Appointments */}
       {pastAppointments.length > 0 && (
