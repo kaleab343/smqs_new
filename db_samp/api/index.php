@@ -247,7 +247,50 @@ $router->add('GET', '/admin/stats', function () {
             $activeNow = (int)$stmt->fetchColumn();
         } catch (Throwable $e) { $activeNow = 0; }
 
+        // Compute system health based on per-doctor efficiency for today
         $health = 'good';
+        try {
+            $apptsTbl = Database::table('appointments');
+            // Aggregate today's appointments per doctor
+            $sql = "SELECT doctor_id,
+                           COUNT(*) AS total,
+                           SUM(CASE WHEN LOWER(status) = 'completed' THEN 1 ELSE 0 END) AS completed
+                    FROM {$apptsTbl}
+                    WHERE DATE(scheduled_time) = CURDATE()
+                    GROUP BY doctor_id";
+            $rows = $pdo->query($sql)->fetchAll();
+            $effs = [];
+            foreach ($rows as $r) {
+                $total = (int)($r['total'] ?? 0);
+                $completed = (int)($r['completed'] ?? 0);
+                if ($total > 0) {
+                    $effs[] = $completed / max(1, $total); // 0..1
+                }
+            }
+            if (count($effs) > 0) {
+                $bins = ['lt50' => 0, '50to75' => 0, 'gte75' => 0];
+                foreach ($effs as $e) {
+                    if ($e < 0.5) $bins['lt50']++;
+                    elseif ($e < 0.75) $bins['50to75']++;
+                    else $bins['gte75']++;
+                }
+                $totalDoctorsWithAppts = array_sum($bins);
+                // Determine primary bin
+                arsort($bins);
+                $primary = array_key_first($bins);
+                // Perfect if at least 90% of doctors are >= 75%
+                $propGte75 = $totalDoctorsWithAppts > 0 ? ($bins['gte75'] ?? 0) / $totalDoctorsWithAppts : 0;
+                if ($propGte75 >= 0.9) {
+                    $health = 'perfect';
+                } else {
+                    if ($primary === 'gte75') $health = 'good';
+                    elseif ($primary === '50to75') $health = 'moderate';
+                    else $health = 'bad';
+                }
+            }
+        } catch (Throwable $e) {
+            // Keep default health if computation fails
+        }
         return Response::json([
             'total_users' => $totalUsers,
             'total_doctors' => $totalDoctors,
@@ -256,7 +299,7 @@ $router->add('GET', '/admin/stats', function () {
             'health' => $health,
         ]);
     } catch (Throwable $e) {
-        return Response::json(['error' => $e->getMessage(), 'health' => 'critical'], 500);
+        return Response::json(['error' => $e->getMessage(), 'health' => 'bad'], 500);
     }
 });
 
