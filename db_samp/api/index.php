@@ -27,6 +27,7 @@ $doctorsCtl = new DoctorsController();
 $router->add('POST', '/auth/register', fn() => $auth->register());
 $router->add('POST', '/auth/login', fn() => $auth->login());
 $router->add('GET', '/users', fn() => $auth->listUsers());
+$router->add('POST', '/users', fn() => $auth->createUserBasic());
 
 // Meta
 $router->add('GET', '/departments', fn() => $meta->departments());
@@ -207,6 +208,30 @@ $router->add('GET', '/admin/activities', function () {
                     'user' => $row['name'] ?: ('DID:' . $row['doctor_id']),
                     'time' => $time ?: date('Y-m-d H:i:s'),
                     'status' => in_array(strtoupper($row['status']), ['ACTIVE'], true) ? 'success' : 'pending',
+                ];
+            }
+        } catch (Throwable $e) { /* ignore */ }
+
+        // Receptionist activity (from users table)
+        try {
+            $usersTbl = Database::table('users');
+            $where = ["role = 'receptionist'"];
+            if ($fromTs !== null) { $where[] = "(updated_at >= :from OR (updated_at IS NULL AND created_at >= :from))"; }
+            if ($toTs !== null) { $where[] = "(updated_at <= :to OR (updated_at IS NULL AND created_at <= :to))"; }
+            $sql = "SELECT user_id, username, role, created_at, updated_at FROM {$usersTbl} WHERE " . implode(' AND ', $where) . " ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 1000";
+            $stmt = $pdo->prepare($sql);
+            if ($fromTs !== null) { $stmt->bindValue(':from', date('Y-m-d H:i:s', $fromTs)); }
+            if ($toTs !== null) { $stmt->bindValue(':to', date('Y-m-d H:i:s', $toTs)); }
+            $stmt->execute();
+            foreach ($stmt as $row) {
+                $time = $row['updated_at'] ?: $row['created_at'];
+                $events[] = [
+                    'id' => 'recept_' . $row['user_id'],
+                    'type' => 'receptionist',
+                    'description' => 'Receptionist activity',
+                    'user' => $row['username'],
+                    'time' => $time,
+                    'status' => 'success',
                 ];
             }
         } catch (Throwable $e) { /* ignore */ }

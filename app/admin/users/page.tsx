@@ -294,17 +294,30 @@ export default function AdminUsersPage() {
         await refetchUsers()
         setShowEditModal(false)
       } else {
-        // Creating users from Admin panel isn't defined in API yet; keep client-add for now
-        const newUser: User = {
-          id: String(users.length + 1),
-          name: formData.name,
-          email: formData.email,
-          role: formData.role,
-          status: "active",
-          joinDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }),
+        // Create via backend register endpoint
+        const tmpPassword = "0000"
+        const res = await fetch('/api/php/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: formData.name,
+            email: formData.email,
+            password: tmpPassword,
+            role: formData.role,
+            specialization: formData.role === 'doctor' ? (formData.specialization || '') : undefined,
+          })
+        })
+        if (!res.ok) {
+          let detail = ''
+          try {
+            const j = await res.json()
+            detail = j?.message || j?.error || ''
+          } catch {}
+          throw new Error(`Register failed: ${res.status}${detail ? ` - ${detail}` : ''}`)
         }
-        setUsers((prev) => [...prev, newUser])
+        await refetchUsers()
         setShowAddModal(false)
+        alert(`User created. Temporary password: ${tmpPassword}`)
       }
     } catch (e) {
       console.error(e)
@@ -547,6 +560,21 @@ export default function AdminUsersPage() {
                   <option value="super_admin" disabled={!canCreateRole('super_admin')} title={!canCreateRole('super_admin') ? 'Admins cannot create Super Admin users' : ''}>Super Admin</option>
                 </select>
               </div>
+              {formData.role === 'doctor' && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Specialization</label>
+                  <select
+                    value={formData.specialization}
+                    onChange={(e) => setFormData({ ...formData, specialization: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    <option value="">Select specialization</option>
+                    <option value="Cardiology">Cardiology</option>
+                    <option value="Pediatrics">Pediatrics</option>
+                    <option value="Dermatology">Dermatology</option>
+                  </select>
+                </div>
+              )}
               <div className="flex gap-2 justify-end pt-4">
                 <Button variant="outline" onClick={() => setShowAddModal(false)}>
                   Cancel
@@ -597,8 +625,8 @@ export default function AdminUsersPage() {
                   <option value="patient">Patient</option>
                   <option value="doctor">Doctor</option>
                   <option value="receptionist">Receptionist</option>
-                  <option value="admin">Administrator</option>
-                  <option value="super_admin">Super Admin</option>
+                  <option value="admin" disabled={!canCreateRole('admin')} title={!canCreateRole('admin') ? 'Admins cannot assign Admin role' : ''}>Administrator</option>
+                  <option value="super_admin" disabled={!canCreateRole('super_admin')} title={!canCreateRole('super_admin') ? 'Admins cannot assign Super Admin role' : ''}>Super Admin</option>
                 </select>
               </div>
               {formData.role === 'doctor' && (

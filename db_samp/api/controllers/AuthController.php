@@ -8,6 +8,45 @@ require_once __DIR__ . '/../models/DoctorModel.php';
 
 class AuthController
 {
+    // Create a user only in users table (no patients/doctors side-effects)
+    public function createUserBasic()
+    {
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+        $isJson = stripos($contentType, 'application/json') !== false;
+        if ($isJson) {
+            $body = json_decode(file_get_contents('php://input'), true) ?? [];
+        } else {
+            $body = $_POST ?: (json_decode(file_get_contents('php://input'), true) ?? []);
+        }
+        $username = trim($body['username'] ?? $body['name'] ?? '');
+        $email = trim($body['email'] ?? '');
+        $password = (string)($body['password'] ?? '');
+        $role = trim($body['role'] ?? 'patient');
+        $specialization = isset($body['specialization']) ? (string)$body['specialization'] : '';
+        if (!$username || !$email || !$password) {
+            return Response::json(['error' => 'missing_fields'], 400);
+        }
+        $users = new UserModel();
+        // Check duplicates
+        $existing = $users->findByUsernameOrEmail($email) ?: $users->findByUsernameOrEmail($username);
+        if ($existing) {
+            return Response::json(['error' => 'duplicate', 'message' => 'Email or username already exists'], 409);
+        }
+        try {
+            $id = $users->createUser([
+                'username' => $username,
+                'email' => $email,
+                'password' => $password,
+                'role' => $role,
+                'specialization' => ($role === 'doctor' && $specialization !== '') ? $specialization : null,
+            ]);
+            $row = (new UserModel())->getById($id);
+            return Response::json($row, 201);
+        } catch (Throwable $e) {
+            return Response::json(['error' => 'create_failed', 'message' => $e->getMessage()], 500);
+        }
+    }
+
     public function register()
     {
         // Support both JSON and form-urlencoded
@@ -35,6 +74,12 @@ class AuthController
         $patients = new PatientModel();
         $doctors = new DoctorModel();
 
+        // Reject duplicate users by email/username in users table
+        $existing = $users->findByUsernameOrEmail($email) ?: $users->findByUsernameOrEmail($name ?: $email);
+        if ($existing) {
+            return Response::json(['error' => 'Email already registered'], 409);
+        }
+
         $patientId = null;
         if ($role === 'patient') {
             if ($patients->findByEmail($email)) {
@@ -42,13 +87,17 @@ class AuthController
             }
         }
 
-        $userId = $users->createUser([
-            'username' => ($name ?: $email), // store full name as username when provided
-            'password' => $password, // NOTE: store hashed in production
-            'role' => $role ?: 'patient',
-            'email' => $email,
-            'specialization' => ($role === 'doctor' && $specialization !== '') ? $specialization : null,
-        ]);
+        try {
+            $userId = $users->createUser([
+                'username' => ($name ?: $email), // store full name as username when provided
+                'password' => $password, // NOTE: store hashed in production
+                'role' => $role ?: 'patient',
+                'email' => $email,
+                'specialization' => ($role === 'doctor' && $specialization !== '') ? $specialization : null,
+            ]);
+        } catch (Throwable $e) {
+            return Response::json(['error' => 'create_failed', 'message' => $e->getMessage()], 500);
+        }
 
         if ($role === 'patient') {
             $patientId = $patients->create([
