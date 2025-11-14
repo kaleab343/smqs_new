@@ -22,6 +22,7 @@ export default function DoctorQueuePage() {
   const { user } = useAuth()
 
   const [queue, setQueue] = useState<QueuedPatient[]>([])
+  const [todaysAppointments, setTodaysAppointments] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -95,68 +96,50 @@ export default function DoctorQueuePage() {
           apptById.set(Number(a.appointment_id), a)
         }
 
-        // Filter queue by assigned doctor AND by today's scheduled date.
+        // Build a unified list of ALL of today's appointments for this doctor for the Current Queue table
         const todayStr = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
-        const filtered = (q || []).filter((row: any) => {
-          const a = apptById.get(Number(row.appointment_id))
-          if (!a) return false // cannot verify date/doctor without appointment details
+        const todaysForDoctor = (appts || []).filter((a: any) => {
           const isToday = String(a.scheduled_time || '').slice(0, 10) === todayStr
-          if (!isToday) return false
-          if (doctorId == null) return true
-          return Number(a.doctor_id) === Number(doctorId)
+          return isToday // include ALL appointments today, regardless of doctor
         })
 
-        // Map to UI model; fallbacks for missing fields
-        const mappedFromQueue: QueuedPatient[] = filtered.map((row: any) => {
-          const a = apptById.get(Number(row.appointment_id)) || {}
-          const appointmentId = Number(a.appointment_id || row.appointment_id)
-          const id = String(a.queue_number ?? row.queue_number ?? appointmentId ?? row.queue_id)
-          const name = a.patient_name || `PID:${a.patient_id ?? "?"}`
-          const reason = a.specialization || "Appointment"
-          const position = Number(row.position || 0) || Number(a.queue_number || 0) || 0
-          // Wait time estimate: (position-1) * 15 min
-          const waitTime = Math.max(0, (position - 1) * 15)
-          const status = a?.status ? String(a.status) : (position === 1 ? "in-consultation" : "waiting")
-          return { id, appointmentId, position, name, reason, waitTime, status }
+        // Map queue positions by appointment id when available
+        const posByApptId = new Map<number, number>()
+        for (const row of (q || [])) {
+          const a = apptById.get(Number(row.appointment_id))
+          if (!a) continue
+          const isToday = String(a.scheduled_time || '').slice(0,10) === todayStr
+          if (!isToday) continue
+          posByApptId.set(Number(row.appointment_id), Number(row.position || a.queue_number || 0))
+        }
+
+        // Map to UI model for ALL today's appointments
+        let finalList: QueuedPatient[] = todaysForDoctor.map((a: any, idx: number) => {
+          const appointmentId = Number(a.appointment_id)
+          const position = posByApptId.get(appointmentId) ?? (a.queue_number ? Number(a.queue_number) : (idx + 1))
+          const id = String(a.queue_number ?? appointmentId)
+          const name = a.patient_name || `PID:${a.patient_id ?? '?'}`
+          const reason = a.specialization || a.reason || 'Appointment'
+          const waitTime = Math.max(0, (Number(position) - 1) * 15)
+          const status = a?.status ? String(a.status) : (Number(position) === 1 ? 'in-consultation' : 'waiting')
+          return { id, appointmentId, position: Number(position), name, reason, waitTime, status }
         })
 
-        // Fallback: if no queue rows, derive queue from today's pending/scheduled appointments for this doctor
-        let finalList: QueuedPatient[] = mappedFromQueue
-        try {
-          if ((mappedFromQueue?.length ?? 0) === 0 && doctorId != null) {
-            const todayStr = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
-            const todaysForDoctor = (appts || []).filter((a: any) => {
-              // Only appointments scheduled for today
-              return String(a.scheduled_time || '').slice(0,10) === todayStr && Number(a.doctor_id) === Number(doctorId)
-            })
-            const active = todaysForDoctor.filter((a: any) => {
-              const s = String(a.status || '').toLowerCase()
-              return s === 'pending' || s === 'scheduled' || s === 'called' || s === 'in-consultation'
-            })
-            // Only use today's appointments; if none, show empty list (no fallback to other dates)
-            const source = active
-            // sort by queue_number then scheduled_time
-            source.sort((a: any, b: any) => {
-              const qa = a.queue_number ?? Number.MAX_SAFE_INTEGER
-              const qb = b.queue_number ?? Number.MAX_SAFE_INTEGER
-              if (qa !== qb) return qa - qb
-              return String(a.scheduled_time || '').localeCompare(String(b.scheduled_time || ''))
-            })
-            finalList = source.map((a: any, idx: number) => {
-              const appointmentId = Number(a.appointment_id)
-              const position = (a.queue_number && Number(a.queue_number) > 0) ? Number(a.queue_number) : (idx + 1)
-              const id = String(a.queue_number ?? appointmentId)
-              const name = a.patient_name || `PID:${a.patient_id ?? '?'}`
-              const reason = a.specialization || a.reason || 'Appointment'
-              const waitTime = Math.max(0, (position - 1) * 15)
-              // Reflect status from appointment if available; otherwise derive from position
-              const status = a?.status ? String(a.status) : (position === 1 ? 'in-consultation' : 'waiting')
-              return { id, appointmentId, position, name, reason, waitTime, status }
-            })
-          }
-        } catch {}
+        // Sort by explicit position first, then by scheduled time
+        finalList.sort((pa, pb) => {
+          if (pa.position !== pb.position) return pa.position - pb.position
+          const a = apptById.get(Number(pa.appointmentId)) || {}
+          const b = apptById.get(Number(pb.appointmentId)) || {}
+          return String(a.scheduled_time || '').localeCompare(String(b.scheduled_time || ''))
+        })
 
-        if (!cancelled) setQueue(finalList)
+        if (!cancelled) {
+          setQueue(finalList)
+          // Also keep today's appointments for this doctor to list under the queue
+          try {
+            setTodaysAppointments(todaysForDoctor)
+          } catch { setTodaysAppointments([]) }
+        }
       } catch (e: any) {
         if (!cancelled) setError(e?.message || "Failed to load queue")
       } finally {
@@ -363,7 +346,7 @@ export default function DoctorQueuePage() {
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex gap-2 justify-end">
-                          {(["waiting","scheduled","pending"].includes(String(patient.status).toLowerCase())) && (
+                          {(["waiting"].includes(String(patient.status).toLowerCase())) && (
                             <>
                               <Button variant="outline" size="sm" onClick={() => handleCallNext(patient.id)}>
                                 Call
@@ -371,7 +354,7 @@ export default function DoctorQueuePage() {
                             </>
                           )}
 
-                          {(["in-consultation","in_consultation","called"].includes(String(patient.status).toLowerCase())) && (
+                          {(["in-consultation","in_consultation","called","pending"].includes(String(patient.status).toLowerCase())) && (
                             <Button
                               size="sm"
                               className="bg-emerald-600 hover:bg-emerald-700"
@@ -391,6 +374,56 @@ export default function DoctorQueuePage() {
                   <tr>
                     <td colSpan={6} className="py-6 text-center text-gray-500">
                       {loading ? "Loading..." : "No patients found"}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Today's Appointments (All from appointments table for this doctor and today) */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Today's Appointments</CardTitle>
+          <CardDescription>All appointments for today for this doctor (from appointments table)</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Appt ID</th>
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Patient</th>
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Time</th>
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {todaysAppointments.length > 0 ? (
+                  todaysAppointments
+                    .slice()
+                    .sort((a: any, b: any) => String(a.scheduled_time || '').localeCompare(String(b.scheduled_time || '')))
+                    .map((a: any) => (
+                      <tr key={String(a.appointment_id)} className="border-b hover:bg-gray-50">
+                        <td className="py-3 px-4">{String(a.appointment_id)}</td>
+                        <td className="py-3 px-4">{a.patient_name || `PID:${a.patient_id ?? '?'}`}</td>
+                        <td className="py-3 px-4">{String(a.scheduled_time || '').slice(0, 16).replace('T',' ')}</td>
+                        <td className="py-3 px-4">
+                          <Badge className={getStatusColor(String(a.status))}>
+                            <div className="flex items-center gap-1">
+                              {getStatusIcon(String(a.status))}
+                              {String(a.status)}
+                            </div>
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-gray-500">
+                      {loading ? "Loading..." : "No appointments for today"}
                     </td>
                   </tr>
                 )}
