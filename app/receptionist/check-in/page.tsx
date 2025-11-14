@@ -92,11 +92,25 @@ export default function ReceptionistCheckInPage() {
    }
  }, [showCheckInModal])
 
-  const filteredPatients = patients.filter(
-    (p) =>
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.email.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
+  const norm = (s: string) =>
+    (s || "")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "") // strip accents
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, " ")
+
+  const filteredPatients = patients.filter((p) => {
+    const name = norm(p.name)
+    const email = norm(p.email)
+    const q = norm(searchTerm)
+    if (!q) return true
+    // If query looks like an email, match email only
+    if (q.includes("@")) return email.includes(q)
+    // Otherwise, require all tokens to be present in the name
+    const tokens = q.split(" ").filter(Boolean)
+    return tokens.every((t) => name.includes(t))
+  })
 
   const getStatusColor = (status: string) => {
     switch (status) {

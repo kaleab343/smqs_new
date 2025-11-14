@@ -148,8 +148,8 @@ class AppointmentsController
                                 $provided = strtolower(trim($patientName));
                                 $stored = strtolower(trim((string)($existing['name'] ?? '')));
                                 if ($stored !== '' && $provided !== '' && $provided !== $stored) {
-                                    $pdo->rollBack();
-                                    return Response::json(['error' => 'Provided name does not match existing patient for this email'], 400);
+                                    // Do not block creation on name mismatch; prefer existing patient's name
+                                    $patientName = (string)($existing['name'] ?? $patientName);
                                 }
                             }
                             $patient_id = (int)$existing['patient_id'];
@@ -241,11 +241,12 @@ class AppointmentsController
                 // If the doctor is currently assigned to other patients (has active queue/appointments), and we auto-created this patient,
 // then mark this new appointment as 'waiting'; otherwise leave as 'pending'.
 $apptTbl = Database::table('appointments');
-$stmtBusy = $pdo->prepare("SELECT COUNT(1) AS c FROM {$apptTbl} WHERE doctor_id = :did AND status IN ('pending','called','in-consultation')");
+// Determine initial status: if doctor has no patient currently in-consultation, start this one as in-consultation; otherwise waiting
+$stmtBusy = $pdo->prepare("SELECT COUNT(1) AS c FROM {$apptTbl} WHERE doctor_id = :did AND status = 'in-consultation'");
 $stmtBusy->execute([':did' => $doctor_id]);
 $busyCount = (int)($stmtBusy->fetch()['c'] ?? 0);
-$doctorBusy = $busyCount > 0;
-$initialStatus = $doctorBusy ? 'waiting' : 'pending';
+$doctorHasInConsult = $busyCount > 0;
+$initialStatus = $doctorHasInConsult ? 'waiting' : 'in-consultation';
 $appointment_id = $appointments->create($patient_id, $doctor_id, $normalizedTime, $initialStatus, $queueNum);
                 $queue->enqueue($appointment_id, $queueNum, null);
 

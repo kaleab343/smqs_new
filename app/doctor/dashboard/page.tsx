@@ -13,7 +13,6 @@ interface TodayStats {
   totalPatients: number
   servedToday: number
   currentInQueue: number
-  averageConsultationTime: number
 }
 
 interface Consultation {
@@ -29,10 +28,15 @@ export default function DoctorDashboard() {
   const { user } = useAuth()
   const [stats, setStats] = useState<TodayStats | null>(null)
 
-  // Derived from DB appointments: the pending appointment for this doctor (today)
+  // Derived from DB appointments: the in-consultation appointment for this doctor (today)
   const [currentAppt, setCurrentAppt] = useState<{ id: string; name: string; reason?: string; queueNumber?: number } | null>(null)
   const { callNextPatient, completeConsultation } = useQueue()
   const [doctorId, setDoctorId] = useState<string | null>(null)
+
+  // Today's queue for this doctor and browsing index for Next/Prev navigation
+  const [doctorQueue, setDoctorQueue] = useState<any[]>([])
+  const [browseIndex, setBrowseIndex] = useState<number | null>(null)
+  const [avgServedAllDoctors, setAvgServedAllDoctors] = useState<number>(0)
 
   const [consultations, setConsultations] = useState<Consultation[]>([])
   const [loadingConsults, setLoadingConsults] = useState(false)
@@ -55,9 +59,22 @@ export default function DoctorDashboard() {
   }
 
   const handleNextPatient = () => {
-    if (doctorId) {
-      callNextPatient(doctorId)
+    // Browse forward within today's queue for this doctor.
+    // Determine current index based on currentAppt id.
+    const currentIdx = doctorQueue.findIndex((a) => String(a.appointment_id) === (currentAppt?.id || ""))
+    if (browseIndex === null) {
+      const next = currentIdx >= 0 ? currentIdx + 1 : 0
+      if (next < doctorQueue.length) setBrowseIndex(next)
+    } else {
+      const next = Math.min(doctorQueue.length - 1, browseIndex + 1)
+      if (next !== browseIndex) setBrowseIndex(next)
     }
+  }
+
+  const handlePrevPatient = () => {
+    if (browseIndex === null) return
+    const prev = Math.max(0, browseIndex - 1)
+    if (prev !== browseIndex) setBrowseIndex(prev)
   }
 
   const handleViewAnalytics = () => {
@@ -135,21 +152,24 @@ export default function DoctorDashboard() {
           totalPatients: totalToday,
           servedToday: completedToday.length + cancelledToday.length,
           currentInQueue: inQueue.length,
-          averageConsultationTime: 15, // placeholder; compute if you store durations
         }
 
         // Determine the current patient for this doctor: prefer in-consultation, otherwise pending; sort by queue_number then time
         const isStatus = (a: any, statuses: string[]) => statuses.includes(String(a.status || '').toLowerCase())
         const inConsultation = todaysAppts.filter((a) => isStatus(a, ['in-consultation','in_consultation']))
-        const pending = todaysAppts.filter((a) => isStatus(a, ['pending']))
+        const waiting = todaysAppts.filter((a) => isStatus(a, ['waiting']))
         const sortAppts = (list: any[]) => list.slice().sort((a, b) => {
           const qa = a.queue_number ?? Number.MAX_SAFE_INTEGER
           const qb = b.queue_number ?? Number.MAX_SAFE_INTEGER
           if (qa !== qb) return qa - qb
           return (a.scheduled_time || '').localeCompare(b.scheduled_time || '')
         })
-        const currentCandidate = (inConsultation.length > 0 ? sortAppts(inConsultation)[0] : sortAppts(pending)[0])
+        const currentCandidate = (inConsultation.length > 0 ? sortAppts(inConsultation)[0] : sortAppts(waiting)[0])
+        // Build and store the full queue for this doctor for today (sorted by queue_number then time)
+        const sortedTodayForDoctor = sortAppts(todaysAppts)
         if (!cancelled) {
+          setDoctorQueue(sortedTodayForDoctor)
+          setBrowseIndex(null) // reset browsing when data refreshes
           if (currentCandidate) {
             setCurrentAppt({
               id: String(currentCandidate.appointment_id),
@@ -174,7 +194,7 @@ export default function DoctorDashboard() {
             const time = a.scheduled_time ? new Date(a.scheduled_time) : null
             const timeStr = time ? time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
             const s = String(a.status || '').toLowerCase()
-            const normalized = (s === 'completed' || s === 'pending' || s === 'cancelled' || s === 'canceled') ? (s === 'canceled' ? 'cancelled' : s) : 'pending'
+            const normalized = (s === 'completed' || s === 'in-consultation' || s === 'in_consultation' || s === 'cancelled' || s === 'canceled' || s === 'waiting') ? (s === 'canceled' ? 'cancelled' : (s === 'in_consultation' ? 'in-consultation' : s)) : 'waiting'
             return {
               id: String(a.appointment_id),
               name: a.patient_name || `PID:${a.patient_id}`,
@@ -225,7 +245,7 @@ export default function DoctorDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-emerald-600">{stats?.servedToday ?? 0}</div>
-            <p className="text-xs text-gray-500 mt-1">Completed consultations</p>
+            <p className="text-xs text-gray-500 mt-1">Completed or Cancelled consultations</p>
           </CardContent>
         </Card>
 
@@ -251,7 +271,7 @@ export default function DoctorDashboard() {
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="font-semibold text-lg text-gray-900">{currentAppt?.name || "No patient pending"}</p>
+              <p className="font-semibold text-lg text-gray-900">{currentAppt?.name || "No patient in consultation"}</p>
               {currentAppt?.reason ? (
                 <p className="text-sm text-gray-600">{currentAppt.reason}</p>
               ) : (
@@ -262,14 +282,51 @@ export default function DoctorDashboard() {
               <Badge className="bg-blue-100 text-blue-800">Queue #{currentAppt.queueNumber}</Badge>
             ) : null}
           </div>
-          <div className="flex gap-3">
-            <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={handleMarkComplete}>
-              <CheckCircle2 className="w-4 h-4 mr-2" />
-              Mark Complete
-            </Button>
-            <Button variant="outline" className="flex-1 bg-transparent" onClick={handleNextPatient}>
-              Next Patient
-            </Button>
+          <div className="flex flex-col gap-3">
+            <div className="flex gap-3">
+              <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={handleMarkComplete}>
+                <CheckCircle2 className="w-4 h-4 mr-2" />
+                Mark Complete
+              </Button>
+              {browseIndex === null ? (
+                <Button
+                  variant="outline"
+                  className="flex-1 bg-transparent"
+                  onClick={handleNextPatient}
+                  disabled={(doctorQueue.findIndex((a) => String(a.appointment_id) === (currentAppt?.id || "")) + 1) >= doctorQueue.length}
+                >
+                  Next
+                </Button>
+              ) : (
+                <div className="flex-1 flex gap-2">
+                  {browseIndex > 0 && (
+                    <Button variant="outline" className="flex-1" onClick={handlePrevPatient}>Previous</Button>
+                  )}
+                  <Button variant="outline" className="flex-1" onClick={handleNextPatient} disabled={browseIndex >= doctorQueue.length - 1}>Next</Button>
+                </div>
+              )}
+            </div>
+            {(() => {
+              // Hide the "Next up" line if at the top of the list
+              const currentIdx = doctorQueue.findIndex((a) => String(a.appointment_id) === (currentAppt?.id || ""))
+              if (browseIndex === null) {
+                // Not browsing: hide when current is first or not found
+                if (currentIdx <= 0) return null
+              } else {
+                // Browsing: hide when browsing pointer is at first item
+                if (browseIndex <= 0) return null
+              }
+
+              const idx = browseIndex === null
+                ? (currentIdx + 1)
+                : browseIndex
+              const item = idx >= 0 && idx < doctorQueue.length ? doctorQueue[idx] : null
+              return item ? (
+                <div className="text-sm text-gray-700">
+                  Next up: <span className="font-medium text-gray-900">{item.patient_name || `PID:${item.patient_id}`}</span>
+                </div>
+              ) : null
+            })()}
           </div>
         </CardContent>
       </Card>
@@ -300,7 +357,6 @@ export default function DoctorDashboard() {
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Patient Name</th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Time</th>
                   <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
-                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Duration (min)</th>
                   <th className="text-right py-3 px-4 font-semibold text-gray-700">Queue #</th>
                 </tr>
               </thead>
@@ -316,13 +372,12 @@ export default function DoctorDashboard() {
                       <td className="py-3 px-4 font-medium text-gray-900">{patient.name}</td>
                       <td className="py-3 px-4 text-gray-600">{patient.time}</td>
                       <td className="py-3 px-4 text-gray-600 capitalize">{patient.status}</td>
-                      <td className="py-3 px-4 text-right font-medium text-gray-900">{patient.status === 'completed' ? (patient.duration ?? '-') : '-'}</td>
                       <td className="py-3 px-4 text-right font-medium text-gray-900">{patient.queueNumber ?? '-'}</td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="py-6 text-center text-gray-500">
+                    <td colSpan={5} className="py-6 text-center text-gray-500">
                       {loadingConsults ? "Loading..." : "No consultations found"}
                     </td>
                   </tr>
@@ -358,10 +413,6 @@ export default function DoctorDashboard() {
             <DialogDescription>View your performance metrics</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm text-gray-600">Average Consultation Time</p>
-              <p className="text-2xl font-bold text-blue-600 mt-1">{stats?.averageConsultationTime ?? 15} minutes</p>
-            </div>
             <div className="p-4 bg-green-50 rounded-lg">
               <p className="text-sm text-gray-600">Patients Served Today</p>
               <p className="text-2xl font-bold text-green-600 mt-1">{stats?.servedToday ?? 0}</p>
@@ -369,7 +420,7 @@ export default function DoctorDashboard() {
             <div className="p-4 bg-purple-50 rounded-lg">
               <p className="text-sm text-gray-600">Efficiency Rate</p>
               <p className="text-2xl font-bold text-purple-600 mt-1">
-                {stats ? Math.round(((stats.servedToday || 0) / Math.max(1, stats.totalPatients || 0)) * 100) : 0}%
+                {stats ? Math.min(100, Math.round(((stats.servedToday || 0) / Math.max(1, avgServedAllDoctors || 0)) * 100)) : 0}%
               </p>
             </div>
           </div>

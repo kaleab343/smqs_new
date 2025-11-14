@@ -100,7 +100,9 @@ export default function DoctorQueuePage() {
         const todayStr = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
         const todaysForDoctor = (appts || []).filter((a: any) => {
           const isToday = String(a.scheduled_time || '').slice(0, 10) === todayStr
-          return isToday // include ALL appointments today, regardless of doctor
+          if (!isToday) return false
+          if (doctorId == null) return false
+          return Number(a.doctor_id) === Number(doctorId)
         })
 
         // Map queue positions by appointment id when available
@@ -161,8 +163,9 @@ export default function DoctorQueuePage() {
     })
   }, [queue, searchTerm])
 
-  const hasPending = useMemo(() => {
-    return (queue || []).some((p) => String(p.status).toLowerCase() === 'pending')
+  const hasInConsultation = useMemo(() => {
+    const s = (v: any) => String(v?.status || '').toLowerCase()
+    return (queue || []).some((p) => s(p) === 'in-consultation' || s(p) === 'in_consultation')
   }, [queue])
 
   const handleMarkComplete = async (id: string) => {
@@ -220,8 +223,7 @@ export default function DoctorQueuePage() {
  }
 
   const handleCallNext = (id: string) => {
-    // Placeholder: would call backend to mark as called
-    setQueue((prev) => prev.map((p) => (p.id === id ? { ...p, status: "called" } : p)))
+    // Updated: handled in handleCallNext to set in-consultation and cancel others
   }
 
   const handleMoveUp = (id: string, currentPos: number) => {
@@ -287,7 +289,10 @@ export default function DoctorQueuePage() {
             <CardTitle className="text-sm font-medium text-gray-600">Total in Queue</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-gray-900">{filteredQueue.length}</div>
+            <div className="text-3xl font-bold text-gray-900">{filteredQueue.filter(p => {
+              const s = String(p.status).toLowerCase()
+              return s !== 'in-consultation' && s !== 'in_consultation' && s !== 'completed'
+            }).length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -368,7 +373,7 @@ export default function DoctorQueuePage() {
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex gap-2 justify-end">
-                          {((!hasPending) && ["waiting"].includes(String(patient.status).toLowerCase())) && (
+                          {((!hasInConsultation) && ["waiting","scheduled"].includes(String(patient.status).toLowerCase())) && (
                             <>
                               <Button variant="outline" size="sm" onClick={() => handleCallNext(patient.id)}>
                                 Call
@@ -376,7 +381,7 @@ export default function DoctorQueuePage() {
                             </>
                           )}
 
-                          {(["in-consultation","in_consultation","called","pending"].includes(String(patient.status).toLowerCase())) && (
+                          {(["in-consultation","in_consultation","called"].includes(String(patient.status).toLowerCase())) && (
                             <div className="flex gap-2 justify-end">
                               <Button
                                 size="sm"
