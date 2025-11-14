@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,32 +17,9 @@ interface Appointment {
 }
 
 export default function AppointmentsPage() {
-  const [appointments, setAppointments] = useState<Appointment[]>([
-    {
-      id: "ID0001",
-      date: "Nov 15, 2025",
-      time: "10:00 AM",
-      doctor: "Dr. Sarah Johnson",
-      specialty: "General Practice",
-      status: "confirmed",
-    },
-    {
-      id: "ID0002",
-      date: "Nov 8, 2025",
-      time: "2:30 PM",
-      doctor: "Dr. Michael Chen",
-      specialty: "Cardiology",
-      status: "completed",
-    },
-    {
-      id: "ID0003",
-      date: "Oct 25, 2025",
-      time: "11:00 AM",
-      doctor: "Dr. Emily Roberts",
-      specialty: "Dermatology",
-      status: "cancelled",
-    },
-  ])
+  const [appointments, setAppointments] = useState<Appointment[]>([])
+  const [loadingAppointments, setLoadingAppointments] = useState(false)
+  const [appointmentsError, setAppointmentsError] = useState<string | null>(null)
 
   const [showBookModal, setShowBookModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -50,6 +27,8 @@ export default function AppointmentsPage() {
   const [doctorSearch, setDoctorSearch] = useState("")
   const [selectedDate, setSelectedDate] = useState("")
   const [selectedTime, setSelectedTime] = useState("")
+  const [doctors, setDoctors] = useState<Array<{ doctor_id: number; name: string; specialization?: string; status?: string }>>([])
+  const [loadingDoctors, setLoadingDoctors] = useState(false)
 
   const handleEditAppointment = (id: string) => {
     console.log("[v0] Editing appointment:", id)
@@ -83,24 +62,79 @@ export default function AppointmentsPage() {
     setAppointments((prev) => prev.map((apt) => (apt.id === id ? { ...apt, status: "cancelled" as const } : apt)))
   }
 
-  const handleBookAppointment = () => {
-    console.log("[v0] Book appointment clicked", { doctor: doctorSearch, date: selectedDate, time: selectedTime })
-    if (doctorSearch && selectedDate && selectedTime) {
-      const newId = Math.max(...appointments.map((a) => Number.parseInt(a.id.replace("ID", "")))) + 1
-      const appointmentId = `ID${String(newId).padStart(4, "0")}`
-      const newAppointment: Appointment = {
-        id: appointmentId,
-        date: selectedDate,
-        time: selectedTime,
-        doctor: doctorSearch,
-        specialty: "General Practice",
-        status: "confirmed",
+  useEffect(() => {
+    const run = async () => {
+      try {
+        setLoadingDoctors(true)
+        const res = await fetch('/api/php/doctors', { cache: 'no-store' })
+        const data = await res.json().catch(() => [])
+        if (Array.isArray(data)) {
+          setDoctors(data.filter((d: any) => String(d.status || 'ACTIVE').toUpperCase() === 'ACTIVE'))
+        }
+      } catch (e) {
+        setDoctors([])
+      } finally {
+        setLoadingDoctors(false)
       }
-      setAppointments([newAppointment, ...appointments])
+    }
+    run()
+  }, [])
+
+  const handleBookAppointment = async () => {
+    try {
+      if (!doctorSearch || !selectedDate || !selectedTime) {
+        alert('Please select a doctor, date, and time')
+        return
+      }
+      // Build local scheduled_time as YYYY-MM-DD HH:MM:SS
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const [y,m,d] = selectedDate.split('-').map(Number)
+      const [hh,mm] = selectedTime.split(':').map(Number)
+      const dt = new Date(y, (m||1)-1, d||1, hh||0, mm||0, 0)
+      const scheduled_time = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`
+
+      // Enforce not in the past on client as well
+      if (dt.getTime() < Date.now()) {
+        alert('Cannot schedule in the past')
+        return
+      }
+
+      const stored = (typeof window !== 'undefined') ? JSON.parse(localStorage.getItem('smqs-user') || '{}') : {}
+      const user_id = stored?.id ? Number(stored.id) : 0
+      if (!user_id) {
+        alert('Missing logged-in user. Please sign in again.')
+        return
+      }
+
+      const payload = { user_id, doctor_id: Number(doctorSearch), scheduled_time }
+      const res = await fetch('/api/php/appointments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const msg = data?.error || data?.message || 'Failed to create appointment'
+        alert(msg)
+        return
+      }
+      // Success
+      alert('Appointment booked successfully')
       setShowBookModal(false)
-      setDoctorSearch("")
-      setSelectedDate("")
-      setSelectedTime("")
+      setDoctorSearch('')
+      setSelectedDate('')
+      setSelectedTime('')
+      // Optionally update local list (append)
+      setAppointments(prev => [{
+        id: String(data?.appointment_id || Date.now()),
+        date: scheduled_time.slice(0,10),
+        time: scheduled_time.slice(11,16),
+        doctor: String(doctorSearch),
+        specialty: '',
+        status: 'confirmed'
+      }, ...prev])
+    } catch (e: any) {
+      alert(e?.message || 'Unexpected error')
     }
   }
 
@@ -117,8 +151,69 @@ export default function AppointmentsPage() {
     }
   }
 
-  const upcomingAppointments = appointments.filter((apt) => apt.status === "confirmed")
-  const pastAppointments = appointments.filter((apt) => apt.status === "completed")
+  const parseSqlDateTime = (s: string) => {
+    // Parse 'YYYY-MM-DD HH:MM:SS' without timezone shifts
+    const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})[ T]([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?/.exec(s || '')
+    if (!m) return null
+    const y = Number(m[1]), mo = Number(m[2]) - 1, d = Number(m[3])
+    const h = Number(m[4]), mi = Number(m[5]), se = Number(m[6] || '0')
+    return new Date(y, mo, d, h, mi, se)
+  }
+
+  // Backend already filters to future-only when loading; use as-is
+  const upcomingAppointments = appointments
+  const pastAppointments = appointments.filter((apt) => {
+    const s = `${apt.date}${apt.time ? ' ' + apt.time + ':00' : ''}`
+    const dt = parseSqlDateTime(s) || (apt.date ? new Date(apt.date) : new Date())
+    return apt.status !== 'cancelled' && dt.getTime() <= Date.now()
+  })
+
+  useEffect(() => {
+    const run = async () => {
+      try {
+        setLoadingAppointments(true)
+        setAppointmentsError(null)
+        const base = '/api/php'
+        const stored = (typeof window !== 'undefined') ? JSON.parse(localStorage.getItem('smqs-user') || '{}') : {}
+        const user_id = stored?.id
+        if (!user_id) return
+        // Fetch all appointments and filter by this patient and future times
+        const resCur = await fetch(`${base}/appointments/current?user_id=${encodeURIComponent(user_id)}`, { cache: 'no-store' })
+        const cur = await resCur.json().catch(() => ({}))
+        const patient_id = cur?.patient_id
+        let url = ''
+        if (patient_id) {
+          url = `${base}/appointments?patient_id=${encodeURIComponent(patient_id)}&future_only=1`
+        } else {
+          // Fallback: filter by user_id if patient mapping is missing
+          url = `${base}/appointments?user_id=${encodeURIComponent(user_id)}&future_only=1`
+        }
+        const resAll = await fetch(url, { cache: 'no-store' })
+        const all = await resAll.json().catch(() => [])
+        const nowTs = Date.now()
+        const items: Appointment[] = (Array.isArray(all) ? all : [])
+          .map((r: any) => ({
+            id: String(r.appointment_id),
+            doctor: r.doctor_name || `#${r.doctor_id}`,
+            specialty: r.specialization || '',
+            date: String(r.scheduled_time || '').slice(0,10),
+            time: String(r.scheduled_time || '').slice(11,16),
+            status: String(r.status || 'confirmed') as any,
+          }))
+          .filter((apt) => {
+            const dt = (apt.date && apt.time) ? new Date(`${apt.date} ${apt.time}`) : new Date(apt.date)
+            return dt.getTime() > nowTs && apt.status !== 'cancelled'
+          })
+          .sort((a, b) => new Date(`${a.date} ${a.time}`).getTime() - new Date(`${b.date} ${b.time}`).getTime())
+        setAppointments(items)
+      } catch (e: any) {
+        setAppointmentsError(e?.message || 'Failed to load appointments')
+      } finally {
+        setLoadingAppointments(false)
+      }
+    }
+    run()
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -136,7 +231,7 @@ export default function AppointmentsPage() {
         </Button>
       </div>
 
-      {upcomingAppointments.length > 0 && (
+      {upcomingAppointments.length > 0 ? (
         <div>
           <h2 className="text-xl font-semibold text-gray-900 mb-4">Upcoming Appointments</h2>
           <Card>
@@ -199,6 +294,15 @@ export default function AppointmentsPage() {
             </CardContent>
           </Card>
         </div>
+      ) : (
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Upcoming Appointments</h2>
+          <Card>
+            <CardContent className="pt-6">
+              <p className="text-gray-600">No schedule yet</p>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* Past Appointments */}
@@ -251,20 +355,26 @@ export default function AppointmentsPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Doctor Name</label>
-              <input
-                type="text"
-                placeholder="Enter doctor name"
+              <label className="block text-sm font-medium text-gray-700 mb-2">Doctor</label>
+              <select
                 value={doctorSearch}
                 onChange={(e) => setDoctorSearch(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              >
+                <option value="">{loadingDoctors ? 'Loading doctors...' : (doctors.length ? 'Select a doctor' : 'No active doctors')}</option>
+                {doctors.map((d) => (
+                  <option key={d.doctor_id} value={String(d.doctor_id)}>
+                    {d.name}{d.specialization ? ` (${d.specialization})` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
               <input
                 type="date"
                 value={selectedDate}
+                min={new Date().toISOString().slice(0,10)}
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
@@ -299,14 +409,19 @@ export default function AppointmentsPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Doctor Name</label>
-              <input
-                type="text"
-                placeholder="Enter doctor name"
+              <label className="block text-sm font-medium text-gray-700 mb-2">Doctor</label>
+              <select
                 value={doctorSearch}
                 onChange={(e) => setDoctorSearch(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              >
+                <option value="">{loadingDoctors ? 'Loading doctors...' : (doctors.length ? 'Select a doctor' : 'No active doctors')}</option>
+                {doctors.map((d) => (
+                  <option key={d.doctor_id} value={String(d.doctor_id)}>
+                    {d.name}{d.specialization ? ` (${d.specialization})` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>

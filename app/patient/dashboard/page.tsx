@@ -92,6 +92,19 @@ export default function PatientDashboard() {
   const [countdown, setCountdown] = useState<string>("")
   const [patientStatus, setPatientStatus] = useState<string>("")
   const [patientsAhead, setPatientsAhead] = useState<number>(0)
+  const [assignedDoctorName, setAssignedDoctorName] = useState<string>("")
+  const [assignedDoctorId, setAssignedDoctorId] = useState<number | null>(null)
+  const [todayDoctorQueueCount, setTodayDoctorQueueCount] = useState<number>(0)
+
+  const isLocalSameDay = (s: string | null) => {
+    if (!s) return false
+    // Ensure ISO-like format for reliable parsing
+    const normalized = s.includes('T') ? s : s.replace(' ', 'T')
+    const d = new Date(normalized)
+    if (isNaN(d.getTime())) return false
+    const now = new Date()
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+  }
 
   // Specialization modal state
   const [specOpen, setSpecOpen] = useState(false)
@@ -124,20 +137,31 @@ export default function PatientDashboard() {
           const current = await fetchJsonWithFallback(`/appointments/current?user_id=${encodeURIComponent(uid)}`)
           const appt = (current && (current.appointment || current)) || null
           const qinfo = (current && (current.queue || null)) || null
+          const doc = (current && (current.doctor || null)) || null
           const status = String(appt?.status || current?.status || '')
           const when = (appt?.scheduled_time || current?.scheduled_time || current?.time || current?.appointment_time || null)
           const pos = typeof qinfo?.position === 'number' ? qinfo.position : (qinfo?.position ? Number(qinfo.position) : 0)
           const doctorId = appt?.doctor_id || current?.doctor_id || null
-          // Compute patients ahead for the same doctor only
+          const doctorName = doc?.name || null
+          // Compute patients ahead for the same doctor only and today's queue count for that doctor
           let aheadByDoctor = 0
-          if (Array.isArray(q) && doctorId && pos > 0) {
-            aheadByDoctor = q.filter((row: any) => Number(row.position) < pos && Number(row.doctor_id) === Number(doctorId)).length
+          let todayCount = 0
+          if (Array.isArray(q)) {
+            const todayStr = new Date().toISOString().slice(0,10)
+            const sameDocRows = doctorId ? q.filter((row: any) => Number(row.doctor_id) === Number(doctorId)) : []
+            if (pos > 0 && doctorId) {
+              aheadByDoctor = sameDocRows.filter((row: any) => Number(row.position) < pos).length
+            }
+            todayCount = sameDocRows.filter((row: any) => String(row.scheduled_time || '').slice(0,10) === todayStr).length
           }
           if (!cancelled) {
             const activeStatuses = ['pending','waiting','called','in-consultation']
             setIsPending(activeStatuses.includes(status))
             setPatientStatus(status)
             setPatientsAhead((status === 'in-consultation' || status === 'pending') ? 0 : aheadByDoctor)
+            setAssignedDoctorId(doctorId ? Number(doctorId) : null)
+            setAssignedDoctorName(doctorName || '')
+            setTodayDoctorQueueCount(todayCount)
             if (when) {
               setHasAppointment(true)
               setNextApptAt(when)
@@ -286,11 +310,11 @@ export default function PatientDashboard() {
           <CardHeader>
             <CardTitle className="text-lg">Current Status</CardTitle>
             <CardDescription>
-              {hasAppointment && nextApptAt ? (
-                <>Next appointment in <span className="font-semibold text-gray-900">{countdown}</span></>
-              ) : (
-                <>No appointments booked</>
-              )}
+              {hasAppointment && nextApptAt
+                ? (isLocalSameDay(nextApptAt)
+                    ? <>Scheduled is today</>
+                    : <>Next appointment in <span className="font-semibold text-gray-900">{countdown}</span></>)
+                : <>No appointments booked</>}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -334,6 +358,7 @@ export default function PatientDashboard() {
             </div>
           </CardContent>
         </Card>
+
       </div>
 
       {/* Recent Activity */}

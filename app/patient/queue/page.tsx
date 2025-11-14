@@ -11,6 +11,9 @@ interface PhpQueueEntry {
   appointment_id: number
   queue_number: number
   position: number
+  doctor_id?: number
+  scheduled_time?: string
+  patient_name?: string
 }
 
 interface UiQueueEntry {
@@ -26,6 +29,10 @@ export default function QueueStatusPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
+  const [assignedDoctorId, setAssignedDoctorId] = useState<number | null>(null)
+  const [assignedDoctorName, setAssignedDoctorName] = useState<string>("")
+  const [todayDoctorQueueCount, setTodayDoctorQueueCount] = useState<number>(0)
+  const [todayDoctorWaitingCount, setTodayDoctorWaitingCount] = useState<number>(0)
 
   useEffect(() => {
     let mounted = true
@@ -34,10 +41,63 @@ export default function QueueStatusPage() {
         setLoading(true)
         setError(null)
         const { getPhpApiBase } = await import("@/lib/php-api-config")
-        const resp = await fetch(`${getPhpApiBase()}/queue`, { cache: "no-store" })
+        const base = getPhpApiBase()
+        const resp = await fetch(`${base}/queue`, { cache: "no-store" })
         const data = await resp.json()
         if (!resp.ok) throw new Error(data?.error || "Failed to load queue")
-        if (mounted) setRaw(Array.isArray(data) ? data : [])
+        const rows: PhpQueueEntry[] = Array.isArray(data) ? data : []
+        if (mounted) setRaw(rows)
+
+        // Determine assigned doctor for logged-in patient and compute today's queue count
+        try {
+          const stored = (typeof window !== 'undefined') ? JSON.parse(localStorage.getItem('smqs-user') || '{}') : {}
+          const uid = stored?.id
+          if (uid) {
+            const resp2 = await fetch(`${base}/appointments/current?user_id=${encodeURIComponent(uid)}`, { cache: 'no-store' })
+            const cur = await resp2.json()
+            if (resp2.ok && cur) {
+              const appt = cur.appointment || cur
+              const doc = cur.doctor || null
+              const did = Number(appt?.doctor_id || cur?.doctor_id || 0) || null
+              const dname = doc?.name || ''
+              if (mounted) {
+                setAssignedDoctorId(did)
+                setAssignedDoctorName(dname)
+                if (did) {
+                  const todayStr = new Date().toISOString().slice(0,10)
+                  const sameDocToday = rows.filter(r => Number(r.doctor_id) === did && String(r.scheduled_time || '').slice(0,10) === todayStr)
+                  const count = sameDocToday.length
+                  setTodayDoctorQueueCount(count)
+                  // Estimate waiting as all entries except the one with smallest position (assumed in-consultation)
+                  if (sameDocToday.length > 0) {
+                    const minPos = Math.min(...sameDocToday.map(r => Number(r.position)))
+                    const waiting = sameDocToday.filter(r => Number(r.position) !== minPos).length
+                    setTodayDoctorWaitingCount(waiting)
+                  } else {
+                    setTodayDoctorWaitingCount(0)
+                  }
+                } else {
+                  setTodayDoctorQueueCount(0)
+                  setTodayDoctorWaitingCount(0)
+                }
+              }
+            } else if (mounted) {
+              setAssignedDoctorId(null)
+              setAssignedDoctorName('')
+              setTodayDoctorQueueCount(0)
+            }
+          } else if (mounted) {
+            setAssignedDoctorId(null)
+            setAssignedDoctorName('')
+            setTodayDoctorQueueCount(0)
+          }
+        } catch {
+          if (mounted) {
+            setAssignedDoctorId(null)
+            setAssignedDoctorName('')
+            setTodayDoctorQueueCount(0)
+          }
+        }
       } catch (e: any) {
         if (mounted) setError(e?.message || "Failed to load queue")
       } finally {
@@ -51,18 +111,23 @@ export default function QueueStatusPage() {
 
   const queueEntries: UiQueueEntry[] = useMemo(() => {
     const avgMins = 15
-    const minPos = raw.length ? Math.min(...raw.map((r) => r.position)) : 0
-    return raw
+    if (!assignedDoctorId) return []
+    const todayStr = new Date().toISOString().slice(0,10)
+    const sameDocToday = raw.filter(r => Number(r.doctor_id) === Number(assignedDoctorId) && String(r.scheduled_time || '').slice(0,10) === todayStr)
+    if (sameDocToday.length === 0) return []
+    const minPosAll = Math.min(...sameDocToday.map(r => Number(r.position)))
+    const waitingRows = sameDocToday.filter(r => Number(r.position) !== minPosAll)
+    return waitingRows
       .slice()
       .sort((a, b) => a.position - b.position)
       .map((r) => ({
         id: String(r.queue_number ?? r.queue_id),
         position: r.position,
-        patientName: null, // Not provided by backend; can be enhanced via a /queue/detailed endpoint
-        status: r.position === minPos ? "in-consultation" : "waiting",
+        patientName: r.patient_name || null,
+        status: "waiting",
         estimatedTime: Math.max(0, (r.position - 1) * avgMins),
       }))
-  }, [raw])
+  }, [raw, assignedDoctorId])
 
   const filteredEntries = useMemo(() => {
     const query = searchQuery.toLowerCase()
@@ -103,18 +168,30 @@ export default function QueueStatusPage() {
             <CardTitle className="text-sm font-medium text-gray-600">Currently Serving</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-gray-900">{currentInConsultation?.position || "-"}</div>
-            <p className="text-sm text-gray-500 mt-1">{currentInConsultation?.id || "None"}</p>
+            {assignedDoctorId ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Doctor</span>
+                  <span className="text-base font-semibold text-gray-900">{assignedDoctorName || `#${assignedDoctorId}`}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600">Today&#39;s queue for this doctor</span>
+                  <span className="text-2xl font-bold text-gray-900">{todayDoctorQueueCount}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 rounded px-3 py-2">Not assigned doctor yet</div>
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Waiting</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-600">Waiting (for your doctor today)</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-gray-900">{totalWaiting}</div>
-            <p className="text-sm text-gray-500 mt-1">Patients in queue</p>
+            <div className="text-3xl font-bold text-gray-900">{assignedDoctorId ? todayDoctorWaitingCount : totalWaiting}</div>
+            <p className="text-sm text-gray-500 mt-1">{assignedDoctorId ? 'Patients waiting for your doctor today' : 'Patients in queue'}</p>
           </CardContent>
         </Card>
 
@@ -150,42 +227,47 @@ export default function QueueStatusPage() {
                   <th className="text-left py-3 px-4 font-medium text-gray-600">Position</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-600">Patient Name</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-600">Status</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-600">Estimated Time</th>
+                  
                 </tr>
               </thead>
               <tbody>
-                {filteredEntries.length > 0 ? (
-                  filteredEntries.map((entry) => (
-                    <tr key={entry.id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-3 px-4">
-                        <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded text-gray-700">
-                          {entry.id}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center font-bold text-blue-600 text-sm">
-                          {entry.position}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-gray-900">{entry.patientName ?? '-'}</td>
-                      <td className="py-3 px-4">
-                        <Badge className={getStatusColor(entry.status)}>
-                          {entry.status === "in-consultation"
-                            ? "Serving"
-                            : entry.status === "waiting"
-                              ? "Waiting"
-                              : "Completed"}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-4 text-gray-600">
-                        {entry.status === "in-consultation" ? "In progress" : `${entry.estimatedTime} min`}
+                {assignedDoctorId ? (
+                  filteredEntries.length > 0 ? (
+                    filteredEntries.map((entry) => (
+                      <tr key={entry.id} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="py-3 px-4">
+                          <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded text-gray-700">
+                            {entry.id}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center font-bold text-blue-600 text-sm">
+                            {entry.position}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-gray-900">{entry.patientName ?? '-'}</td>
+                        <td className="py-3 px-4">
+                          <Badge className={getStatusColor(entry.status)}>
+                            {entry.status === "in-consultation"
+                              ? "Serving"
+                              : entry.status === "waiting"
+                                ? "Waiting"
+                                : "Completed"}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="py-6 px-4 text-center text-gray-500">
+                        {error ? `Error: ${error}` : loading ? "Loading..." : "No waiting patients for your doctor today"}
                       </td>
                     </tr>
-                  ))
+                  )
                 ) : (
                   <tr>
                     <td colSpan={5} className="py-6 px-4 text-center text-gray-500">
-                      {error ? `Error: ${error}` : loading ? "Loading..." : "No queue entries"}
+                      No schedule yet
                     </td>
                   </tr>
                 )}
@@ -195,27 +277,6 @@ export default function QueueStatusPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Queue Insights</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-start gap-3">
-            <Zap className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-medium text-gray-900">Peak Hours</p>
-              <p className="text-sm text-gray-600">Queue is usually longest between 2-4 PM</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-3">
-            <Clock className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-medium text-gray-900">Best Time to Visit</p>
-              <p className="text-sm text-gray-600">Morning hours (9-11 AM) have shorter wait times</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 }

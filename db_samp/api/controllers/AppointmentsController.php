@@ -52,14 +52,38 @@ class AppointmentsController
             $appt = Database::table('appointments');
             $patients = Database::table('patients');
             $doctors = Database::table('doctors');
+            $user_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : 0;
+            $patient_id = isset($_GET['patient_id']) ? (int)$_GET['patient_id'] : 0;
+            $futureOnly = isset($_GET['future_only']) ? (int)$_GET['future_only'] : 0;
+
+            $where = [];
+            $params = [];
+            if ($patient_id > 0) {
+                // Prefer filtering by explicit patient_id
+                $where[] = 'a.patient_id = :pid';
+                $params[':pid'] = $patient_id;
+            } elseif ($user_id > 0) {
+                // Otherwise filter by the patient's user_id mapping
+                $where[] = 'p.user_id = :uid';
+                $params[':uid'] = $user_id;
+            }
+            if ($futureOnly) {
+                $where[] = 'a.scheduled_time > NOW()';
+                $where[] = "a.status <> 'cancelled'";
+            }
+            $whereSql = count($where) ? ('WHERE ' . implode(' AND ', $where)) : '';
+
             $sql = "SELECT a.appointment_id, a.patient_id, a.doctor_id, a.scheduled_time, a.status, a.queue_number,
                            p.name AS patient_name, p.email AS patient_email,
                            d.name AS doctor_name, d.specialization
                     FROM {$appt} a
                     LEFT JOIN {$patients} p ON p.patient_id = a.patient_id
                     LEFT JOIN {$doctors} d ON d.doctor_id = a.doctor_id
-                    ORDER BY a.scheduled_time DESC, a.appointment_id DESC";
-            $rows = $pdo->query($sql)->fetchAll();
+                    {$whereSql}
+                    ORDER BY a.scheduled_time ASC, a.appointment_id DESC";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll();
             return Response::json($rows);
         } catch (Throwable $e) {
             return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
@@ -225,7 +249,7 @@ class AppointmentsController
                 // Block creating a new appointment if patient already has an active one in 'pending' or 'in-consultation'
                 try {
                     $apptTbl = Database::table('appointments');
-                    $stmtDup = $pdo->prepare("SELECT COUNT(1) AS c FROM {$apptTbl} WHERE patient_id = :pid AND status IN ('pending','in-consultation')");
+                    $stmtDup = $pdo->prepare("SELECT COUNT(1) AS c FROM {$apptTbl} WHERE patient_id = :pid AND status IN ('pending','waiting','in-consultation')");
                     $stmtDup->execute([':pid' => $patient_id]);
                     $dupCount = (int)($stmtDup->fetch()['c'] ?? 0);
                     if ($dupCount > 0) {
@@ -400,7 +424,11 @@ $appointment_id = $appointments->create($patient_id, $doctor_id, $normalizedTime
             }
             $appointments = new AppointmentModel();
             $data = $appointments->getCurrentForPatient($patient_id);
-            return Response::json($data ?: []);
+            if ($data) {
+                if (is_array($data)) { $data['patient_id'] = $patient_id; }
+                return Response::json($data);
+            }
+            return Response::json(['patient_id' => $patient_id]);
         } catch (Throwable $e) {
             return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
         }

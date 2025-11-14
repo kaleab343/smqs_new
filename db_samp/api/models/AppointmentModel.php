@@ -40,7 +40,7 @@ class AppointmentModel
         $appt = Database::table('appointments');
         $queue = Database::table('queue');
         $docs = Database::table('doctors');
-        $sql = "SELECT a.*, q.queue_id, q.queue_number, q.position, d.specialization
+        $sql = "SELECT a.*, q.queue_id, q.queue_number, q.position, d.specialization, d.name AS doctor_name
                 FROM {$appt} a
                 LEFT JOIN {$queue} q ON q.appointment_id = a.appointment_id
                 LEFT JOIN {$docs} d ON d.doctor_id = a.doctor_id
@@ -60,6 +60,11 @@ class AppointmentModel
                 'scheduled_time' => $row['scheduled_time'],
                 'status' => $row['status'],
                 'queue_number' => $row['queue_number'],
+            ],
+            'doctor' => [
+                'doctor_id' => (int)$row['doctor_id'],
+                'name' => $row['doctor_name'] ?? null,
+                'specialization' => $row['specialization'] ?? null,
             ],
             'queue' => $row['queue_id'] ? [
                 'queue_id' => (int)$row['queue_id'],

@@ -114,10 +114,12 @@ class QueueModel {
     public function listAll(): array {
         $queueTbl = Database::table('queue');
         $apptTbl = Database::table('appointments');
-        // Include doctor_id by joining appointments so frontend can filter by doctor
-        $sql = "SELECT q.queue_id, q.appointment_id, q.queue_number, q.position, a.doctor_id
+        $patTbl = Database::table('patients');
+        // Include doctor_id and patient name by joining appointments and patients
+        $sql = "SELECT q.queue_id, q.appointment_id, q.queue_number, q.position, a.doctor_id, a.scheduled_time, p.name AS patient_name
                 FROM {$queueTbl} q
                 LEFT JOIN {$apptTbl} a ON a.appointment_id = q.appointment_id
+                LEFT JOIN {$patTbl} p ON p.patient_id = a.patient_id
                 ORDER BY q.position ASC";
         $stmt = $this->db->query($sql);
         return $stmt->fetchAll();
