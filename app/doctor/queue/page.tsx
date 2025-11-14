@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle2, Clock, AlertCircle, ChevronUp, Search } from "lucide-react"
+import { CheckCircle2, Clock, AlertCircle, Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/lib/auth-context"
 
@@ -15,7 +15,7 @@ interface QueuedPatient {
   name: string
   reason: string
   waitTime: number
-  status: "waiting" | "called" | "in-consultation" | "completed"
+  status: string
 }
 
 export default function DoctorQueuePage() {
@@ -116,7 +116,7 @@ export default function DoctorQueuePage() {
           const position = Number(row.position || 0) || Number(a.queue_number || 0) || 0
           // Wait time estimate: (position-1) * 15 min
           const waitTime = Math.max(0, (position - 1) * 15)
-          const status: QueuedPatient["status"] = position === 1 ? "in-consultation" : "waiting"
+          const status = a?.status ? String(a.status) : (position === 1 ? "in-consultation" : "waiting")
           return { id, appointmentId, position, name, reason, waitTime, status }
         })
 
@@ -149,9 +149,8 @@ export default function DoctorQueuePage() {
               const name = a.patient_name || `PID:${a.patient_id ?? '?'}`
               const reason = a.specialization || a.reason || 'Appointment'
               const waitTime = Math.max(0, (position - 1) * 15)
-              // Reflect status if available, otherwise derive from position
-              const s = String(a.status || '').toLowerCase()
-              const status: QueuedPatient["status"] = (s === 'called' || s === 'in-consultation') ? (s as any) : (position === 1 ? 'in-consultation' : 'waiting')
+              // Reflect status from appointment if available; otherwise derive from position
+              const status = a?.status ? String(a.status) : (position === 1 ? 'in-consultation' : 'waiting')
               return { id, appointmentId, position, name, reason, waitTime, status }
             })
           }
@@ -195,7 +194,7 @@ export default function DoctorQueuePage() {
 
       // Optimistic UI update: mark as completed
       setQueue((prev) =>
-        prev.map((q) => (q.id === id ? { ...q, status: 'completed' as const } : q))
+        prev.map((q) => (q.id === id ? { ...q, status: 'completed' } : q))
       )
 
       // Remove from list after a short delay and reindex others
@@ -217,7 +216,7 @@ export default function DoctorQueuePage() {
 
   const handleCallNext = (id: string) => {
     // Placeholder: would call backend to mark as called
-    setQueue((prev) => prev.map((p) => (p.id === id ? { ...p, status: "called" as const } : p)))
+    setQueue((prev) => prev.map((p) => (p.id === id ? { ...p, status: "called" } : p)))
   }
 
   const handleMoveUp = (id: string, currentPos: number) => {
@@ -228,28 +227,43 @@ export default function DoctorQueuePage() {
     setQueue(newQueue.map((p, i) => ({ ...p, position: i + 1 })))
   }
 
-  const getStatusColor = (status: QueuedPatient["status"]) => {
-    switch (status) {
+  const getStatusColor = (status: string) => {
+    const s = String(status || '').toLowerCase()
+    switch (s) {
       case "in-consultation":
+      case "in_consultation":
         return "bg-green-100 text-green-800"
       case "completed":
         return "bg-emerald-100 text-emerald-800"
       case "called":
         return "bg-blue-100 text-blue-800"
       case "waiting":
+      case "scheduled":
+      case "pending":
         return "bg-yellow-100 text-yellow-800"
+      case "cancelled":
+      case "canceled":
+        return "bg-gray-200 text-gray-700"
+      default:
+        return "bg-gray-100 text-gray-800"
     }
   }
 
-  const getStatusIcon = (status: QueuedPatient["status"]) => {
-    switch (status) {
+  const getStatusIcon = (status: string) => {
+    const s = String(status || '').toLowerCase()
+    switch (s) {
       case "in-consultation":
+      case "in_consultation":
         return <CheckCircle2 className="w-4 h-4" />
       case "completed":
         return <CheckCircle2 className="w-4 h-4" />
       case "called":
         return <AlertCircle className="w-4 h-4" />
       case "waiting":
+      case "scheduled":
+      case "pending":
+        return <Clock className="w-4 h-4" />
+      default:
         return <Clock className="w-4 h-4" />
     }
   }
@@ -277,7 +291,7 @@ export default function DoctorQueuePage() {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-green-600">
-              {filteredQueue.filter((p) => p.status === "in-consultation").length}
+              {filteredQueue.filter((p) => String(p.status).toLowerCase() === "in-consultation" || String(p.status).toLowerCase() === "in_consultation").length}
             </div>
           </CardContent>
         </Card>
@@ -343,35 +357,21 @@ export default function DoctorQueuePage() {
                         <Badge className={getStatusColor(patient.status)}>
                           <div className="flex items-center gap-1">
                             {getStatusIcon(patient.status)}
-                            {patient.status === "in-consultation"
-                              ? "Serving"
-                              : patient.status === "called"
-                                ? "Called"
-                                : patient.status === "completed"
-                                  ? "Completed"
-                                  : "Waiting"}
+                            {String(patient.status)}
                           </div>
                         </Badge>
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex gap-2 justify-end">
-                          {patient.status === "waiting" && (
+                          {(["waiting","scheduled","pending"].includes(String(patient.status).toLowerCase())) && (
                             <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleMoveUp(patient.id, patient.position)}
-                                className="text-blue-600 hover:bg-blue-50"
-                              >
-                                <ChevronUp className="w-4 h-4" />
-                              </Button>
                               <Button variant="outline" size="sm" onClick={() => handleCallNext(patient.id)}>
                                 Call
                               </Button>
                             </>
                           )}
 
-                          {(patient.status === "in-consultation" || patient.status === "called") && (
+                          {(["in-consultation","in_consultation","called"].includes(String(patient.status).toLowerCase())) && (
                             <Button
                               size="sm"
                               className="bg-emerald-600 hover:bg-emerald-700"
@@ -380,7 +380,7 @@ export default function DoctorQueuePage() {
                               Complete
                             </Button>
                           )}
-                          {patient.status === "completed" && (
+                          {String(patient.status).toLowerCase() === "completed" && (
                             <Badge className="bg-emerald-100 text-emerald-800">Done</Badge>
                           )}
                         </div>
