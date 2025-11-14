@@ -161,6 +161,10 @@ export default function DoctorQueuePage() {
     })
   }, [queue, searchTerm])
 
+  const hasPending = useMemo(() => {
+    return (queue || []).some((p) => String(p.status).toLowerCase() === 'pending')
+  }, [queue])
+
   const handleMarkComplete = async (id: string) => {
     try {
       const p = queue.find((q) => q.id === id)
@@ -196,6 +200,24 @@ export default function DoctorQueuePage() {
       console.error('complete error', e)
     }
   }
+
+ const handleCancel = async (id: string) => {
+   try {
+     const p = queue.find((q) => q.id === id)
+     if (!p) return
+     const res = await fetch(
+       `/api/php/appointments/status?id=${encodeURIComponent(String(p.appointmentId))}`,
+       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'cancelled' }) }
+     )
+     if (!res.ok) {
+       console.error('cancel failed', await res.text())
+     }
+     // Optimistic UI update
+     setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, status: 'cancelled' } : q)))
+   } catch (e) {
+     console.error('cancel error', e)
+   }
+ }
 
   const handleCallNext = (id: string) => {
     // Placeholder: would call backend to mark as called
@@ -346,7 +368,7 @@ export default function DoctorQueuePage() {
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex gap-2 justify-end">
-                          {(["waiting"].includes(String(patient.status).toLowerCase())) && (
+                          {((!hasPending) && ["waiting"].includes(String(patient.status).toLowerCase())) && (
                             <>
                               <Button variant="outline" size="sm" onClick={() => handleCallNext(patient.id)}>
                                 Call
@@ -355,13 +377,22 @@ export default function DoctorQueuePage() {
                           )}
 
                           {(["in-consultation","in_consultation","called","pending"].includes(String(patient.status).toLowerCase())) && (
-                            <Button
-                              size="sm"
-                              className="bg-emerald-600 hover:bg-emerald-700"
-                              onClick={() => handleMarkComplete(patient.id)}
-                            >
-                              Complete
-                            </Button>
+                            <div className="flex gap-2 justify-end">
+                              <Button
+                                size="sm"
+                                className="bg-emerald-600 hover:bg-emerald-700"
+                                onClick={() => handleMarkComplete(patient.id)}
+                              >
+                                Complete
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleCancel(patient.id)}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
                           )}
                           {String(patient.status).toLowerCase() === "completed" && (
                             <Badge className="bg-emerald-100 text-emerald-800">Done</Badge>
@@ -383,55 +414,6 @@ export default function DoctorQueuePage() {
         </CardContent>
       </Card>
 
-      {/* Today's Appointments (All from appointments table for this doctor and today) */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Today's Appointments</CardTitle>
-          <CardDescription>All appointments for today for this doctor (from appointments table)</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Appt ID</th>
-                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Patient</th>
-                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Time</th>
-                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {todaysAppointments.length > 0 ? (
-                  todaysAppointments
-                    .slice()
-                    .sort((a: any, b: any) => String(a.scheduled_time || '').localeCompare(String(b.scheduled_time || '')))
-                    .map((a: any) => (
-                      <tr key={String(a.appointment_id)} className="border-b hover:bg-gray-50">
-                        <td className="py-3 px-4">{String(a.appointment_id)}</td>
-                        <td className="py-3 px-4">{a.patient_name || `PID:${a.patient_id ?? '?'}`}</td>
-                        <td className="py-3 px-4">{String(a.scheduled_time || '').slice(0, 16).replace('T',' ')}</td>
-                        <td className="py-3 px-4">
-                          <Badge className={getStatusColor(String(a.status))}>
-                            <div className="flex items-center gap-1">
-                              {getStatusIcon(String(a.status))}
-                              {String(a.status)}
-                            </div>
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))
-                ) : (
-                  <tr>
-                    <td colSpan={4} className="py-6 text-center text-gray-500">
-                      {loading ? "Loading..." : "No appointments for today"}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 }

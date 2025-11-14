@@ -122,28 +122,33 @@ export default function DoctorDashboard() {
 
         const todaysAppts = (appts || []).filter((a) => Number(a.doctor_id) === Number(doctorId) && (a.scheduled_time || "").slice(0,10) === todayStr)
         const completedToday = todaysAppts.filter((a) => (a.status || "").toLowerCase() === "completed")
-        const inQueue = todaysAppts.filter((a) => (a.status || "").toLowerCase() !== "completed")
+        const cancelledToday = todaysAppts.filter((a) => (a.status || "").toLowerCase() === "cancelled" || (a.status || "").toLowerCase() === "canceled")
+        const inQueue = todaysAppts.filter((a) => {
+          const s = (a.status || "").toLowerCase()
+          return s !== "completed" && s !== "cancelled" && s !== "canceled"
+        })
 
         // Compute stats for top cards
         // Total Patients Today should reflect the total number of rows in the appointments table for the current day for THIS doctor
         const totalToday = todaysAppts.length
         const newStats: TodayStats = {
           totalPatients: totalToday,
-          servedToday: completedToday.length,
+          servedToday: completedToday.length + cancelledToday.length,
           currentInQueue: inQueue.length,
           averageConsultationTime: 15, // placeholder; compute if you store durations
         }
 
-        // Determine the current patient for this doctor: first pending by queue_number, then earliest time
-        const pending = todaysAppts.filter((a) => (a.status || '').toLowerCase() === 'pending')
-        const currentCandidate = pending
-          .slice()
-          .sort((a, b) => {
-            const qa = a.queue_number ?? Number.MAX_SAFE_INTEGER
-            const qb = b.queue_number ?? Number.MAX_SAFE_INTEGER
-            if (qa !== qb) return qa - qb
-            return (a.scheduled_time || '').localeCompare(b.scheduled_time || '')
-          })[0]
+        // Determine the current patient for this doctor: prefer in-consultation, otherwise pending; sort by queue_number then time
+        const isStatus = (a: any, statuses: string[]) => statuses.includes(String(a.status || '').toLowerCase())
+        const inConsultation = todaysAppts.filter((a) => isStatus(a, ['in-consultation','in_consultation']))
+        const pending = todaysAppts.filter((a) => isStatus(a, ['pending']))
+        const sortAppts = (list: any[]) => list.slice().sort((a, b) => {
+          const qa = a.queue_number ?? Number.MAX_SAFE_INTEGER
+          const qb = b.queue_number ?? Number.MAX_SAFE_INTEGER
+          if (qa !== qb) return qa - qb
+          return (a.scheduled_time || '').localeCompare(b.scheduled_time || '')
+        })
+        const currentCandidate = (inConsultation.length > 0 ? sortAppts(inConsultation)[0] : sortAppts(pending)[0])
         if (!cancelled) {
           if (currentCandidate) {
             setCurrentAppt({
@@ -216,7 +221,7 @@ export default function DoctorDashboard() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Served Today</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-600">Served/Cancelled Today</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-emerald-600">{stats?.servedToday ?? 0}</div>
