@@ -157,6 +157,32 @@ $router->add('GET', '/admin/activities', function () {
             }
         } catch (Throwable $e) { /* ignore */ }
 
+        // Doctors status activity
+        try {
+            $doctors = Database::table('doctors');
+            $where = [];
+            if ($fromTs !== null) { $where[] = "(updated_at >= :from OR (updated_at IS NULL AND created_at >= :from))"; }
+            if ($toTs !== null) { $where[] = "(updated_at <= :to OR (updated_at IS NULL AND created_at <= :to))"; }
+            $sql = "SELECT doctor_id, name, status, created_at, updated_at FROM {$doctors}";
+            if ($where) { $sql .= " WHERE " . implode(" AND ", $where); }
+            $sql .= " ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 1000";
+            $stmt = $pdo->prepare($sql);
+            if ($fromTs !== null) { $stmt->bindValue(':from', date('Y-m-d H:i:s', $fromTs)); }
+            if ($toTs !== null) { $stmt->bindValue(':to', date('Y-m-d H:i:s', $toTs)); }
+            $stmt->execute();
+            foreach ($stmt as $row) {
+                $time = $row['updated_at'] ?: $row['created_at'];
+                $events[] = [
+                    'id' => 'doc_' . $row['doctor_id'],
+                    'type' => 'doctor_status',
+                    'description' => 'Doctor status ' . strtolower($row['status']),
+                    'user' => $row['name'] ?: ('DID:' . $row['doctor_id']),
+                    'time' => $time ?: date('Y-m-d H:i:s'),
+                    'status' => in_array(strtoupper($row['status']), ['ACTIVE'], true) ? 'success' : 'pending',
+                ];
+            }
+        } catch (Throwable $e) { /* ignore */ }
+
         // Sort by time desc
         usort($events, function ($a, $b) {
             return strcmp($b['time'], $a['time']);

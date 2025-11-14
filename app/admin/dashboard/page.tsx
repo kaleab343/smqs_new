@@ -160,6 +160,21 @@ export default function AdminDashboard() {
 
   const [recentActivities, setRecentActivities] = useState<ActivityLog[]>([] as ActivityLog[])
   // fetched in effect below
+  useEffect(() => {
+    const loadActivities = async () => {
+      try {
+        const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "http://127.0.0.1/code_(1)/db_samp/api/index.php").replace(/\/?$/, "")
+        const res = await fetch(`${base}?r=/admin/activities&limit=50`, { cache: 'no-store' })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        // data is already in the expected shape
+        setRecentActivities(Array.isArray(data) ? data : [])
+      } catch (e) {
+        console.error('Failed to load activities', e)
+      }
+    }
+    loadActivities()
+  }, [])
   const [inactiveDoctors, setInactiveDoctors] = useState<string[]>([])
 
   const getHealthColor = (health: string) => {
