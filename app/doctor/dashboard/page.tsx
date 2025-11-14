@@ -125,9 +125,8 @@ export default function DoctorDashboard() {
         const inQueue = todaysAppts.filter((a) => (a.status || "").toLowerCase() !== "completed")
 
         // Compute stats for top cards
-        // Total Patients Today should reflect the total number of rows in the appointments table for the current day (global),
-        // falling back to the doctor's todaysAppts length if API not available.
-        const totalToday = (todayCount && typeof todayCount.count === 'number') ? todayCount.count : todaysAppts.length
+        // Total Patients Today should reflect the total number of rows in the appointments table for the current day for THIS doctor
+        const totalToday = todaysAppts.length
         const newStats: TodayStats = {
           totalPatients: totalToday,
           servedToday: completedToday.length,
