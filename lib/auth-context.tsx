@@ -99,7 +99,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role: (data.role || 'patient') as UserRole,
       }
       setUser(mapped)
-      localStorage.setItem('smqs-user', JSON.stringify(mapped))
+      // store token alongside user for API calls
+      const session = { ...mapped, token: data?.token, token_expires: data?.token_expires }
+      localStorage.setItem('smqs-user', JSON.stringify(session))
     } finally {
       setIsLoading(false)
     }
@@ -184,7 +186,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role: (data.role || role) as UserRole,
       }
       setUser(mapped)
-      localStorage.setItem('smqs-user', JSON.stringify(mapped))
+      const session = { ...mapped, token: data?.token, token_expires: data?.token_expires }
+      localStorage.setItem('smqs-user', JSON.stringify(session))
     } finally {
       setIsLoading(false)
     }

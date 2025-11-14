@@ -5,6 +5,7 @@ require_once __DIR__ . '/../core/Database.php';
 require_once __DIR__ . '/../models/UserModel.php';
 require_once __DIR__ . '/../models/PatientModel.php';
 require_once __DIR__ . '/../models/DoctorModel.php';
+require_once __DIR__ . '/../core/Jwt.php';
 
 class AuthController
 {
@@ -32,17 +33,21 @@ class AuthController
         if ($existing) {
             return Response::json(['error' => 'duplicate', 'message' => 'Email or username already exists'], 409);
         }
+        $pdo = Database::getConnection();
         try {
+            $pdo->beginTransaction();
             $id = $users->createUser([
                 'username' => $username,
                 'email' => $email,
-                'password' => $password,
+                'password' => password_hash($password, PASSWORD_DEFAULT),
                 'role' => $role,
                 'specialization' => ($role === 'doctor' && $specialization !== '') ? $specialization : null,
             ]);
             $row = (new UserModel())->getById($id);
+            $pdo->commit();
             return Response::json($row, 201);
         } catch (Throwable $e) {
+            try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Throwable $ie) {}
             return Response::json(['error' => 'create_failed', 'message' => $e->getMessage()], 500);
         }
     }
@@ -73,6 +78,8 @@ class AuthController
         $users = new UserModel();
         $patients = new PatientModel();
         $doctors = new DoctorModel();
+        $pdo = Database::getConnection();
+        $pdo->beginTransaction();
 
         // Reject duplicate users by email/username in users table
         $existing = $users->findByUsernameOrEmail($email) ?: $users->findByUsernameOrEmail($name ?: $email);
@@ -90,12 +97,13 @@ class AuthController
         try {
             $userId = $users->createUser([
                 'username' => ($name ?: $email), // store full name as username when provided
-                'password' => $password, // NOTE: store hashed in production
+                'password' => password_hash($password, PASSWORD_DEFAULT),
                 'role' => $role ?: 'patient',
                 'email' => $email,
                 'specialization' => ($role === 'doctor' && $specialization !== '') ? $specialization : null,
             ]);
         } catch (Throwable $e) {
+            try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Throwable $ie) {}
             return Response::json(['error' => 'create_failed', 'message' => $e->getMessage()], 500);
         }
 
@@ -117,11 +125,22 @@ class AuthController
             ]);
         }
 
+        try { if ($pdo->inTransaction()) $pdo->commit(); } catch (Throwable $ie) {}
+
+        // Issue JWT on register
+        $iss = ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        $secret = getenv('JWT_SECRET') ?: 'dev_secret_change_me';
+        $exp = time() + (int)(getenv('JWT_TTL') ?: 3600);
+        $payload = [ 'sub' => (int)$userId, 'role' => $role ?: 'patient', 'email' => $email, 'iss' => $iss, 'iat' => time(), 'exp' => $exp ];
+        $token = Jwt::encode($payload, $secret, 'HS256');
+
         return Response::json([
             'message' => 'Registered',
             'user_id' => $userId,
             'patient_id' => $patientId,
             'role' => $role,
+            'token' => $token,
+            'token_expires' => $exp,
         ], 201);
     }
 
@@ -135,7 +154,7 @@ class AuthController
                 'username' => $r['username'],
                 'email' => $r['email'],
                 'role' => $r['role'],
-                'password' => $r['password'] ?? null,
+                
                 'created_at' => $r['created_at'],
                 'updated_at' => $r['updated_at'] ?? null,
                 'specialization' => $r['specialization'] ?? null,
@@ -157,16 +176,17 @@ class AuthController
             'email' => trim($body['email'] ?? ''),
             'role' => trim($body['role'] ?? ''),
             'specialization' => $body['specialization'] ?? null,
-            'password' => isset($body['password']) ? (string)$body['password'] : '',
+            'password' => (isset($body['password']) && $body['password'] !== '') ? password_hash((string)$body['password'], PASSWORD_DEFAULT) : '',
         ];
         $users = new UserModel();
+        $pdo = Database::getConnection();
+        $pdo->beginTransaction();
         $ok = $users->updateUser((int)$id, $data);
-        if (!$ok) return Response::json(['error' => 'Update failed'], 500);
+        if (!$ok) { try { $pdo->rollBack(); } catch (Throwable $ie) {} return Response::json(['error' => 'Update failed'], 500); }
 
         // Sync role-specific tables (patients/doctors)
         $fresh = $users->getById((int)$id);
         try {
-            $pdo = Database::getConnection();
             if ($fresh && ($fresh['role'] ?? '') === 'doctor') {
                 $name = $fresh['username'] ?? ($data['username'] ?? ($data['email'] ?? 'Doctor'));
                 $email = $fresh['email'] ?? ($data['email'] ?? null);
@@ -217,8 +237,11 @@ class AuthController
                 }
             }
         } catch (Throwable $e) {
-            // Do not fail whole request if sync fails, but include warning
+            try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Throwable $ie) {}
+            return Response::json(['error' => 'Update failed', 'details' => $e->getMessage()], 500);
         }
+
+        try { if ($pdo->inTransaction()) $pdo->commit(); } catch (Throwable $ie) {}
 
         return Response::json($fresh);
     }
@@ -252,8 +275,25 @@ class AuthController
         if (!$user) {
             return Response::json(['error' => 'Invalid credentials'], 401);
         }
-        // Plain comparison for this demo; replace with password_verify for hashes
-        if ((string)($user['password'] ?? '') !== $password) {
+        $stored = (string)($user['password'] ?? '');
+        $valid = false;
+        if ($stored !== '') {
+            // If stored value looks like a bcrypt/argon hash, use password_verify
+            if (preg_match('/^\$2y\$|^\$argon2/i', $stored)) {
+                $valid = password_verify($password, $stored);
+            } else {
+                // Legacy: compare plain text then migrate to hashed
+                $valid = hash_equals($stored, $password);
+                if ($valid) {
+                    try {
+                        $hash = password_hash($password, PASSWORD_DEFAULT);
+                        $users->updateUser((int)$user['user_id'], ['password' => $hash]);
+                        $user['password'] = $hash;
+                    } catch (Throwable $e) { /* ignore migration failure */ }
+                }
+            }
+        }
+        if (!$valid) {
             return Response::json(['error' => 'Invalid credentials'], 401);
         }
 
@@ -274,12 +314,28 @@ class AuthController
         $row = $stmt->fetch();
         $patientId = $row ? (int)$row['patient_id'] : null;
 
+        // Issue JWT
+        $iss = ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        $secret = getenv('JWT_SECRET') ?: 'dev_secret_change_me';
+        $exp = time() + (int)(getenv('JWT_TTL') ?: 3600);
+        $payload = [
+            'sub' => (int)$user['user_id'],
+            'role' => $user['role'] ?: 'patient',
+            'email' => $user['email'] ?? null,
+            'iss' => $iss,
+            'iat' => time(),
+            'exp' => $exp,
+        ];
+        $token = Jwt::encode($payload, $secret, 'HS256');
+
         return Response::json([
             'user_id' => (int)$user['user_id'],
             'username' => $user['username'],
             'email' => $user['email'] ?? null,
             'role' => $user['role'] ?: 'patient',
             'patient_id' => $patientId,
+            'token' => $token,
+            'token_expires' => $exp,
         ]);
     }
 }

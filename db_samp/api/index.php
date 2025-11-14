@@ -69,7 +69,11 @@ $router->add('POST', '/appointments/delete', function () use ($appt) {
 });
 
 // Users management
-$router->add('GET', '/users/{id}', fn($id) => (new UserModel())->getById((int)$id));
+$router->add('GET', '/users/{id}', function ($id) {
+    $row = (new UserModel())->getById((int)$id);
+    if (is_array($row)) { unset($row['password']); }
+    return $row;
+});
 $router->add('PUT', '/users/{id}', fn($id) => $auth->updateUser((int)$id));
 $router->add('PATCH', '/users/{id}', fn($id) => $auth->updateUser((int)$id));
 $router->add('POST', '/users/{id}/update', fn($id) => $auth->updateUser((int)$id));
@@ -276,6 +280,7 @@ $router->add('GET', '/admin/hospital-info', function () {
 $router->add('POST', '/admin/hospital-info', function () {
     try {
         $pdo = Database::getConnection();
+        $pdo->beginTransaction();
         $tbl = Database::table('hospital_information');
         $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
         if (stripos($contentType, 'application/json') !== false) {
@@ -298,8 +303,10 @@ $router->add('POST', '/admin/hospital-info', function () {
             $stmt->execute([':n' => $name, ':e' => $email, ':p' => $phone]);
             $id = (int)$pdo->lastInsertId();
         }
+        $pdo->commit();
         return Response::json(['id' => $id, 'Hospital_Name' => $name, 'Email' => $email, 'Phone' => $phone]);
     } catch (Throwable $e) {
+        try { if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack(); } catch (Throwable $ie) {}
         return Response::json(['error' => $e->getMessage()], 500);
     }
 });

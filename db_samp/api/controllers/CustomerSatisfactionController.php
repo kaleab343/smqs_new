@@ -8,6 +8,8 @@ class CustomerSatisfactionController
     public function insert()
     {
         try {
+            $pdo = Database::getConnection();
+            $pdo->beginTransaction();
             // Parse body (JSON or form)
             $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
             if (stripos($contentType, 'application/json') !== false) {
@@ -54,14 +56,17 @@ class CustomerSatisfactionController
                 $upd = $pdo->prepare("UPDATE {$csatTbl} SET rate = :rate WHERE id = :id");
                 $upd->execute([':rate' => $rate, ':id' => $id]);
                 // updated_date column will auto-update due to ON UPDATE clause
+                $pdo->commit();
                 return Response::json(['id' => $id, 'patient_id' => $patientId, 'rate' => $rate, 'action' => 'updated', 'success' => true]);
             } else {
                 $ins = $pdo->prepare("INSERT INTO {$csatTbl} (patient_id, rate) VALUES (:pid, :rate)");
                 $ins->execute([':pid' => $patientId, ':rate' => $rate]);
                 $id = (int)$pdo->lastInsertId();
+                $pdo->commit();
                 return Response::json(['id' => $id, 'patient_id' => $patientId, 'rate' => $rate, 'action' => 'inserted', 'success' => true]);
             }
         } catch (Throwable $e) {
+            try { if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack(); } catch (Throwable $ie) {}
             return Response::json(['error' => $e->getMessage()], 500);
         }
     }
