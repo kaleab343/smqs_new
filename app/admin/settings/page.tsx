@@ -203,34 +203,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Queue Settings */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Queue Management</CardTitle>
-          <CardDescription>Configure queue parameters</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Max Queue Size</label>
-              <Input
-                type="number"
-                value={settings.maxQueueSize}
-                onChange={(e) => handleChange("maxQueueSize", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Appointment Duration (min)</label>
-              <Input
-                type="number"
-                value={settings.appointmentDuration}
-                onChange={(e) => handleChange("appointmentDuration", e.target.value)}
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Database */}
       <Card>
         <CardHeader>
