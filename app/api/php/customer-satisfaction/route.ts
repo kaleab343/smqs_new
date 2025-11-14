@@ -27,6 +27,30 @@ async function fetchJsonWithFallback(relPath: string) {
   throw new Error(msg || `Fetch failed: ${relPath}`)
 }
 
+export async function GET(req: NextRequest) {
+  try {
+    const base = getPhpApiBase().replace(/\/$/, "")
+    const urls = [
+      ...buildUrls(base, "/customer-satisfaction/average"),
+    ]
+    let last: Response | null = null
+    for (const url of Array.from(new Set(urls))) {
+      try {
+        const r = await fetch(url, { cache: "no-store" })
+        last = r
+        if (r.ok) {
+          const t = await r.text()
+          try { return NextResponse.json(t ? JSON.parse(t) : null) } catch { return NextResponse.json({ message: t }) }
+        }
+      } catch {}
+    }
+    const msg = last ? await last.text().catch(() => "") : ""
+    return NextResponse.json({ error: msg || 'Failed to fetch average satisfaction' }, { status: 500 })
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 })
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({})) as any

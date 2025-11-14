@@ -65,4 +65,24 @@ class CustomerSatisfactionController
             return Response::json(['error' => $e->getMessage()], 500);
         }
     }
+
+    public function average()
+    {
+        try {
+            $pdo = Database::getConnection();
+            $csatTbl = Database::table('customer_satisfaction');
+            $stmt = $pdo->query("SELECT AVG(rate) AS avg_rate, COUNT(*) AS total FROM {$csatTbl}");
+            $row = $stmt->fetch();
+            $avg = isset($row['avg_rate']) ? (float)$row['avg_rate'] : 0.0;
+            $total = isset($row['total']) ? (int)$row['total'] : 0;
+            $pct = $avg > 0 ? round(($avg / 5) * 100) : 0;
+            return Response::json([
+                'average_rate' => $avg,
+                'percentage' => $pct,
+                'total' => $total,
+            ]);
+        } catch (Throwable $e) {
+            return Response::json(['error' => $e->getMessage()], 500);
+        }
+    }
 }

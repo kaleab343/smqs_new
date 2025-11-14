@@ -92,6 +92,7 @@ $router->add('POST', '/users/{id}/delete', fn($id) => $auth->deleteUser((int)$id
 // Customer Satisfaction
 $router->add('POST', '/customer-satisfaction', fn() => $csat->insert());
 $router->add('POST', '/customer-satisfaction/insert', fn() => $csat->insert());
+$router->add('GET', '/customer-satisfaction/average', fn() => $csat->average());
 
 // Queue
 $router->add('GET', '/queue', fn() => $queue->list());

@@ -28,6 +28,7 @@ export default function AnalyticsPage() {
   const [totals, setTotals] = useState<{ doctors: number; patients: number }>({ doctors: 0, patients: 0 })
   const [error, setError] = useState<string>("")
   const [loading, setLoading] = useState<boolean>(false)
+  const [satisfactionPct, setSatisfactionPct] = useState<number>(0)
 
   useEffect(() => {
     let mounted = true
@@ -36,31 +37,35 @@ export default function AnalyticsPage() {
       setError("")
       try {
         const base = getPhpApiBase()
-        const [depsRes, docsRes, queueRes, apptRes, statsRes] = await Promise.all([
+        const [depsRes, docsRes, queueRes, apptRes, statsRes, csatRes] = await Promise.all([
           fetch(`${base}/departments`, { cache: "no-store" }),
           fetch(`${base}/doctors`, { cache: "no-store" }),
           fetch(`${base}/queue`, { cache: "no-store" }),
           fetch(`${base}/appointments`, { cache: "no-store" }),
           fetch(`${base}/admin/stats`, { cache: "no-store" }),
+          fetch(`${base}/customer-satisfaction/average`, { cache: "no-store" }),
         ])
-        const [deps, docs, q, appts, stats] = await Promise.all([
+        const [deps, docs, q, appts, stats, csat] = await Promise.all([
           depsRes.json().catch(() => []),
           docsRes.json().catch(() => []),
           queueRes.json().catch(() => []),
           apptRes.json().catch(() => []),
           statsRes.json().catch(() => ({})),
+          csatRes.json().catch(() => ({})),
         ])
         if (!depsRes.ok) throw new Error((deps && deps.error) || "Failed to load departments")
         if (!docsRes.ok) throw new Error((docs && docs.error) || "Failed to load doctors")
         if (!queueRes.ok) throw new Error((q && q.error) || "Failed to load queue")
         if (!apptRes.ok) throw new Error((appts && appts.error) || "Failed to load appointments")
         if (!statsRes.ok) throw new Error((stats && stats.error) || "Failed to load stats")
+        if (!csatRes.ok) throw new Error((csat && csat.error) || "Failed to load satisfaction")
         if (!mounted) return
         setDepartments(Array.isArray(deps) ? deps : [])
         setDoctors(Array.isArray(docs) ? docs : [])
         setQueue(Array.isArray(q) ? q : [])
         setAppointments(Array.isArray(appts) ? appts : [])
         setTotals({ doctors: Number(stats.total_doctors || 0), patients: Number(stats.total_patients || 0) })
+        setSatisfactionPct(Math.max(0, Math.min(100, Number(csat.percentage || 0))))
       } catch (e: any) {
         if (!mounted) return
         setError(e?.message || "Failed to load analytics")
@@ -304,10 +309,10 @@ export default function AnalyticsPage() {
               <div>
                 <div className="flex justify-between mb-1">
                   <span className="text-sm font-medium text-gray-700">Patient Satisfaction</span>
-                  <span className="text-sm font-bold text-purple-600">88%</span>
+                  <span className="text-sm font-bold text-purple-600">{satisfactionPct}%</span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-purple-600 h-2 rounded-full" style={{ width: "88%" }}></div>
+                  <div className="bg-purple-600 h-2 rounded-full" style={{ width: `${Math.max(5, Math.min(100, satisfactionPct))}%` }}></div>
                 </div>
               </div>
             </div>
