@@ -151,6 +151,22 @@ export default function AnalyticsPage() {
 
   const avgWaitMins = useMemo(() => Math.min(60, Math.round(queue.length * 5)), [queue.length])
 
+  // Doctor utilization computed from appointments and total doctors
+  const doctorUtil = useMemo(() => {
+    const totalDoctors = Math.max(1, Number(totals.doctors || 0))
+    let completed = 0, cancelled = 0
+    for (const a of appointments) {
+      const s = String(a.status || '').toLowerCase()
+      if (s === 'completed') completed++
+      else if (s === 'cancelled' || s === 'canceled') cancelled++
+    }
+    const denom = Math.max(1, completed + cancelled)
+    const pct = Math.round((completed / denom) * 100)
+    const perDocCompleted = +(completed / totalDoctors).toFixed(1)
+    const perDocCancelled = +(cancelled / totalDoctors).toFixed(1)
+    return { completed, cancelled, pct, perDocCompleted, perDocCancelled }
+  }, [appointments, totals.doctors])
+
   return (
     <div className="space-y-6">
       <div>
@@ -278,20 +294,11 @@ export default function AnalyticsPage() {
             <div className="space-y-4">
               <div>
                 <div className="flex justify-between mb-1">
-                  <span className="text-sm font-medium text-gray-700">Queue Efficiency</span>
-                  <span className="text-sm font-bold text-blue-600">92%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-blue-600 h-2 rounded-full" style={{ width: "92%" }}></div>
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between mb-1">
                   <span className="text-sm font-medium text-gray-700">Doctor Utilization</span>
-                  <span className="text-sm font-bold text-green-600">85%</span>
+                  <span className="text-sm font-bold text-green-600">{doctorUtil.pct}%</span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-green-600 h-2 rounded-full" style={{ width: "85%" }}></div>
+                  <div className="bg-green-600 h-2 rounded-full" style={{ width: `${Math.max(5, Math.min(100, doctorUtil.pct))}%` }}></div>
                 </div>
               </div>
               <div>
