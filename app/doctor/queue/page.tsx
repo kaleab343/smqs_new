@@ -305,16 +305,6 @@ export default function DoctorQueuePage() {
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Longest Wait</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-orange-600">
-              {Math.max(0, ...filteredQueue.map((p) => p.waitTime))} min
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Current Queue with Search and Table */}

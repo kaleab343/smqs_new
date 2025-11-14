@@ -81,4 +81,3 @@ class Database
         return "`{$safe}`";
     }
 }
-

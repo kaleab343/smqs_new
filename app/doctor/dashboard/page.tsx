@@ -228,7 +228,7 @@ export default function DoctorDashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-stretch">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600">Total Patients Today</CardTitle>
@@ -251,11 +251,13 @@ export default function DoctorDashboard() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">In Queue</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-600">Efficiency Rate</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{stats?.currentInQueue ?? 0}</div>
-            <p className="text-xs text-gray-500 mt-1">Waiting to be seen</p>
+            <div className="text-3xl font-bold text-purple-600">
+              {stats ? Math.min(100, Math.round(((stats.servedToday || 0) / Math.max(1, avgServedAllDoctors || 0)) * 100)) : 0}%
+            </div>
+            <p className="text-xs text-gray-500 mt-1">Compared to today's doctors average</p>
           </CardContent>
         </Card>
       </div>
