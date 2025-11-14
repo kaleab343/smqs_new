@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Trash2, Plus, Edit2 } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { getPhpApiBase } from "@/lib/php-api-config"
 
 interface Appointment {
   id: string
@@ -33,6 +34,39 @@ export default function AppointmentsPage() {
   useEffect(() => {
     if (typeof window !== 'undefined') localStorage.setItem('patient-csat', String(csat))
   }, [csat])
+
+  // Insert Customer Satisfaction to backend
+  const [csatSubmitting, setCsatSubmitting] = useState(false)
+  const submitCsat = async () => {
+    if (!csat) { alert('Please select a rating first'); return }
+    try {
+      setCsatSubmitting(true)
+      const stored = (typeof window !== 'undefined') ? JSON.parse(localStorage.getItem('smqs-user') || '{}') : {}
+      const user_id = stored?.id ? Number(stored.id) : undefined
+      if (!user_id) {
+        alert('You must be signed in to submit your rating.')
+        return
+      }
+
+      // Submit to Next.js proxy which resolves patient_id and forwards to PHP
+      const res = await fetch('/api/php/customer-satisfaction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rate: csat, user_id })
+      })
+      const text = await res.text()
+      if (!res.ok) {
+        let friendly = text
+        try { const obj = text ? JSON.parse(text) : null; if (obj?.error) friendly = obj.error } catch {}
+        throw new Error(friendly || 'Failed to submit rating')
+      }
+      alert('Thank you! Your rating has been submitted')
+    } catch (e: any) {
+      alert(e?.message || 'Failed to submit rating')
+    } finally {
+      setCsatSubmitting(false)
+    }
+  }
 
   const [showBookModal, setShowBookModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -362,7 +396,7 @@ export default function AppointmentsPage() {
 
       <Card>
         <CardContent className="pt-6">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <span className="text-gray-700 font-medium">Customer Satisfaction:</span>
             {[1,2,3,4,5].map((n) => (
               <button
@@ -377,6 +411,11 @@ export default function AppointmentsPage() {
               </button>
             ))}
             <span className="text-sm text-gray-500 ml-2">{csat > 0 ? `${csat}/5` : 'Not rated yet'}</span>
+            <div className="ml-auto">
+              <Button onClick={submitCsat} disabled={csatSubmitting || csat === 0} className="bg-blue-600 hover:bg-blue-700">
+                {csatSubmitting ? 'Submitting...' : 'Insert'}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

@@ -14,6 +14,7 @@ require_once __DIR__ . '/controllers/AppointmentsController.php';
 require_once __DIR__ . '/controllers/MetaController.php';
 require_once __DIR__ . '/controllers/DoctorsController.php';
 require_once __DIR__ . '/controllers/QueueController.php';
+require_once __DIR__ . '/controllers/CustomerSatisfactionController.php';
 
 $router = new Router();
 
@@ -22,6 +23,7 @@ $appt = new AppointmentsController();
 $meta = new MetaController();
 $queue = new QueueController();
 $doctorsCtl = new DoctorsController();
+$csat = new CustomerSatisfactionController();
 
 // Auth
 $router->add('POST', '/auth/register', fn() => $auth->register());
@@ -86,6 +88,10 @@ $router->add('POST', '/users/update', function () use ($auth) {
     return $auth->updateUser($id);
 });
 $router->add('POST', '/users/{id}/delete', fn($id) => $auth->deleteUser((int)$id));
+
+// Customer Satisfaction
+$router->add('POST', '/customer-satisfaction', fn() => $csat->insert());
+$router->add('POST', '/customer-satisfaction/insert', fn() => $csat->insert());
 
 // Queue
 $router->add('GET', '/queue', fn() => $queue->list());
