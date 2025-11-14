@@ -160,18 +160,46 @@ $router->add('GET', '/admin/activities', function () {
         // Doctors status activity
         try {
             $doctors = Database::table('doctors');
+            // Detect available timestamp columns to avoid empty results when columns are missing
+            $schema = Database::dbName();
+            $colsStmt = $pdo->prepare("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = :s AND TABLE_NAME = 'doctors'");
+            $colsStmt->execute([':s' => $schema]);
+            $cols = array_column($colsStmt->fetchAll(), 'COLUMN_NAME');
+            $hasCreated = in_array('created_at', $cols, true);
+            $hasUpdated = in_array('updated_at', $cols, true);
+
             $where = [];
-            if ($fromTs !== null) { $where[] = "(updated_at >= :from OR (updated_at IS NULL AND created_at >= :from))"; }
-            if ($toTs !== null) { $where[] = "(updated_at <= :to OR (updated_at IS NULL AND created_at <= :to))"; }
-            $sql = "SELECT doctor_id, name, status, created_at, updated_at FROM {$doctors}";
+            if ($fromTs !== null) {
+                if ($hasUpdated || $hasCreated) {
+                    $parts = [];
+                    if ($hasUpdated) $parts[] = "updated_at >= :from";
+                    if ($hasCreated) $parts[] = "created_at >= :from";
+                    $where[] = '(' . implode(' OR ', $parts) . ')';
+                }
+            }
+            if ($toTs !== null) {
+                if ($hasUpdated || $hasCreated) {
+                    $parts = [];
+                    if ($hasUpdated) $parts[] = "updated_at <= :to";
+                    if ($hasCreated) $parts[] = "created_at <= :to";
+                    $where[] = '(' . implode(' OR ', $parts) . ')';
+                }
+            }
+            $select = "SELECT doctor_id, name, status" . ($hasCreated ? ", created_at" : "") . ($hasUpdated ? ", updated_at" : "") . " FROM {$doctors}";
+            $sql = $select;
             if ($where) { $sql .= " WHERE " . implode(" AND ", $where); }
-            $sql .= " ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 1000";
+            if ($hasUpdated || $hasCreated) {
+                $orderExpr = $hasUpdated && $hasCreated ? 'COALESCE(updated_at, created_at)' : ($hasUpdated ? 'updated_at' : 'created_at');
+                $sql .= " ORDER BY {$orderExpr} DESC LIMIT 1000";
+            } else {
+                $sql .= " LIMIT 1000";
+            }
             $stmt = $pdo->prepare($sql);
-            if ($fromTs !== null) { $stmt->bindValue(':from', date('Y-m-d H:i:s', $fromTs)); }
-            if ($toTs !== null) { $stmt->bindValue(':to', date('Y-m-d H:i:s', $toTs)); }
+            if ($fromTs !== null && ($hasUpdated || $hasCreated)) { $stmt->bindValue(':from', date('Y-m-d H:i:s', $fromTs)); }
+            if ($toTs !== null && ($hasUpdated || $hasCreated)) { $stmt->bindValue(':to', date('Y-m-d H:i:s', $toTs)); }
             $stmt->execute();
             foreach ($stmt as $row) {
-                $time = $row['updated_at'] ?: $row['created_at'];
+                $time = ($hasUpdated ? ($row['updated_at'] ?? null) : null) ?: ($hasCreated ? ($row['created_at'] ?? null) : null);
                 $events[] = [
                     'id' => 'doc_' . $row['doctor_id'],
                     'type' => 'doctor_status',
@@ -239,6 +267,130 @@ $router->add('POST', '/admin/hospital-info', function () {
             $id = (int)$pdo->lastInsertId();
         }
         return Response::json(['id' => $id, 'Hospital_Name' => $name, 'Email' => $email, 'Phone' => $phone]);
+    } catch (Throwable $e) {
+        return Response::json(['error' => $e->getMessage()], 500);
+    }
+});
+
+// Export activities as CSV with filters: from, to, type (doctors|patients|all)
+$router->add('GET', '/admin/activities/export', function () {
+    try {
+        $pdo = Database::getConnection();
+        $users = Database::table('users');
+        $appts = Database::table('appointments');
+        $doctors = Database::table('doctors');
+
+        $type = strtolower(trim($_GET['type'] ?? 'all'));
+        if (!in_array($type, ['all','doctors','patients'], true)) { $type = 'all'; }
+        $fromTs = null; $toTs = null;
+        if (!empty($_GET['from'])) { $t = strtotime($_GET['from']); if ($t !== false) $fromTs = $t; }
+        if (!empty($_GET['to'])) { $t = strtotime($_GET['to']); if ($t !== false) $toTs = $t; }
+
+        $events = [];
+        // Patients activity: user signups with role=patient
+        if ($type === 'all' || $type === 'patients') {
+            try {
+                $where = ["role = 'patient'"];
+                if ($fromTs !== null) { $where[] = "created_at >= :from"; }
+                if ($toTs !== null) { $where[] = "created_at <= :to"; }
+                $sql = "SELECT user_id, username, created_at FROM {$users} WHERE " . implode(' AND ', $where) . " ORDER BY created_at DESC LIMIT 5000";
+                $stmt = $pdo->prepare($sql);
+                if ($fromTs !== null) { $stmt->bindValue(':from', date('Y-m-d H:i:s', $fromTs)); }
+                if ($toTs !== null) { $stmt->bindValue(':to', date('Y-m-d H:i:s', $toTs)); }
+                $stmt->execute();
+                foreach ($stmt as $row) {
+                    $events[] = [
+                        'id' => 'user_' . $row['user_id'],
+                        'type' => 'patient_signup',
+                        'description' => 'New patient registered',
+                        'user' => $row['username'],
+                        'time' => $row['created_at'],
+                        'status' => 'success',
+                    ];
+                }
+            } catch (Throwable $e) { /* ignore */ }
+        }
+        // Doctors status activity
+        if ($type === 'all' || $type === 'doctors') {
+            try {
+                // Detect available timestamp columns on doctors table
+                $schema = Database::dbName();
+                $colsStmt = $pdo->prepare("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = :s AND TABLE_NAME = 'doctors'");
+                $colsStmt->execute([':s' => $schema]);
+                $cols = array_column($colsStmt->fetchAll(), 'COLUMN_NAME');
+                $hasCreated = in_array('created_at', $cols, true);
+                $hasUpdated = in_array('updated_at', $cols, true);
+
+                $where = [];
+                if ($fromTs !== null) {
+                    if ($hasUpdated || $hasCreated) {
+                        $parts = [];
+                        if ($hasUpdated) $parts[] = "updated_at >= :from";
+                        if ($hasCreated) $parts[] = "created_at >= :from";
+                        $where[] = '(' . implode(' OR ', $parts) . ')';
+                    }
+                }
+                if ($toTs !== null) {
+                    if ($hasUpdated || $hasCreated) {
+                        $parts = [];
+                        if ($hasUpdated) $parts[] = "updated_at <= :to";
+                        if ($hasCreated) $parts[] = "created_at <= :to";
+                        $where[] = '(' . implode(' OR ', $parts) . ')';
+                    }
+                }
+                $select = "SELECT doctor_id, name, status" . ($hasCreated ? ", created_at" : "") . ($hasUpdated ? ", updated_at" : "") . " FROM {$doctors}";
+                $sql = $select;
+                if ($where) { $sql .= " WHERE " . implode(" AND ", $where); }
+                if ($hasUpdated || $hasCreated) {
+                    $orderExpr = $hasUpdated && $hasCreated ? 'COALESCE(updated_at, created_at)' : ($hasUpdated ? 'updated_at' : 'created_at');
+                    $sql .= " ORDER BY {$orderExpr} DESC LIMIT 5000";
+                } else {
+                    $sql .= " LIMIT 5000";
+                }
+                $stmt = $pdo->prepare($sql);
+                if ($fromTs !== null && ($hasUpdated || $hasCreated)) { $stmt->bindValue(':from', date('Y-m-d H:i:s', $fromTs)); }
+                if ($toTs !== null && ($hasUpdated || $hasCreated)) { $stmt->bindValue(':to', date('Y-m-d H:i:s', $toTs)); }
+                $stmt->execute();
+                foreach ($stmt as $row) {
+                    $time = ($hasUpdated ? ($row['updated_at'] ?? null) : null) ?: ($hasCreated ? ($row['created_at'] ?? null) : null);
+                    $events[] = [
+                        'id' => 'doc_' . $row['doctor_id'],
+                        'type' => 'doctor_status',
+                        'description' => 'Doctor status ' . strtolower($row['status']),
+                        'user' => $row['name'] ?: ('DID:' . $row['doctor_id']),
+                        'time' => $time ?: date('Y-m-d H:i:s'),
+                        'status' => in_array(strtoupper($row['status']), ['ACTIVE'], true) ? 'success' : 'pending',
+                    ];
+                }
+            } catch (Throwable $e) { /* ignore */ }
+        }
+        // Sort
+        usort($events, function ($a, $b) { return strcmp($b['time'], $a['time']); });
+
+        // Build CSV with consistent time formatting
+        $fh = fopen('php://temp', 'w+');
+        $tzName = date_default_timezone_get() ?: 'UTC';
+        fputcsv($fh, ['id','type','description','user','time','timezone','status']);
+        foreach ($events as $ev) {
+            $raw = $ev['time'] ?? '';
+            try {
+                $dt = new DateTimeImmutable($raw ?: 'now');
+            } catch (Throwable $e) {
+                $dt = new DateTimeImmutable();
+            }
+            $timeLocal = $dt->format('Y-m-d H:i:s');
+            fputcsv($fh, [$ev['id'],$ev['type'],$ev['description'],$ev['user'],$timeLocal,$tzName,$ev['status']]);
+        }
+        rewind($fh);
+        $csv = stream_get_contents($fh);
+        fclose($fh);
+
+        header('Content-Type: text/csv; charset=utf-8');
+        $fn = 'activities_' . ($type ?: 'all') . '_' . date('Ymd_His') . '.csv';
+        header('Content-Disposition: attachment; filename="' . $fn . '"');
+        // Prepend UTF-8 BOM for Excel compatibility
+        echo "\xEF\xBB\xBF" . $csv;
+        exit;
     } catch (Throwable $e) {
         return Response::json(['error' => $e->getMessage()], 500);
     }

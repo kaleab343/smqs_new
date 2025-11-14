@@ -124,6 +124,16 @@ export default function AdminDashboard() {
   const [showReportModal, setShowReportModal] = useState(false)
   const [showBackupModal, setShowBackupModal] = useState(false)
   const [reportType, setReportType] = useState("daily")
+  const [reportCategory, setReportCategory] = useState("all") // all | doctors | patients
+  const [fromDate, setFromDate] = useState("")
+  const [toDate, setToDate] = useState("")
+  // Clear date range unless using custom range
+  useEffect(() => {
+    if (reportType !== 'custom') {
+      setFromDate("")
+      setToDate("")
+    }
+  }, [reportType])
   const [metrics, setMetrics] = useState<SystemMetrics>({
     totalUsers: 0,
     totalDoctors: 0,
@@ -413,15 +423,60 @@ export default function AdminDashboard() {
                   <option value="custom">Custom Range</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                <select
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-600"
+                  value={reportCategory}
+                  onChange={(e) => setReportCategory(e.target.value)}
+                >
+                  <option value="all">All</option>
+                  <option value="doctors">Doctors</option>
+                  <option value="patients">Patients</option>
+                </select>
+              </div>
+              {reportType === "custom" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">From</label>
+                    <input type="datetime-local" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">To</label>
+                    <input type="datetime-local" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+                  </div>
+                </div>
+              )}
               <div className="flex gap-3 justify-end">
                 <Button variant="outline" onClick={() => setShowReportModal(false)}>
                   Cancel
                 </Button>
                 <Button
                   className="bg-red-600 hover:bg-red-700"
-                  onClick={() => {
-                    generateReportFile(reportType)
-                    setShowReportModal(false)
+                  onClick={async () => {
+                    try {
+                      const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "http://127.0.0.1/code_(1)/db_samp/api/index.php").replace(/\/?$/, "")
+                      const params = new URLSearchParams()
+                      if (fromDate) params.set('from', new Date(fromDate).toISOString())
+                      if (toDate) params.set('to', new Date(toDate).toISOString())
+                      if (reportCategory) params.set('type', reportCategory)
+                      const url = `${base}?r=/admin/activities/export&${params.toString()}`
+                      const res = await fetch(url)
+                      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                      const blob = await res.blob()
+                      const dlUrl = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = dlUrl
+                      a.download = `activities_${reportCategory || 'all'}_${new Date().toISOString().slice(0,10)}.csv`
+                      document.body.appendChild(a)
+                      a.click()
+                      a.remove()
+                      URL.revokeObjectURL(dlUrl)
+                    } catch (e) {
+                      console.error('Failed to download report', e)
+                    } finally {
+                      setShowReportModal(false)
+                    }
                   }}
                 >
                   <Download className="w-4 h-4 mr-2" />
