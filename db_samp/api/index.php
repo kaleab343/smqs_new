@@ -690,12 +690,24 @@ $router->add('GET', '/admin/logs', function () {
             $pdo = Database::getConnection();
             $dbName = $pdo->query('SELECT DATABASE()')->fetchColumn();
             $version = $pdo->query('SELECT @@version')->fetchColumn();
-            $threads = null; $uptime = null;
+            $threads = null; $uptime = null; $sizeBytes = null; $sizeHuman = null;
             try {
                 $threads = $pdo->query("SHOW STATUS LIKE 'Threads_connected'")->fetch(PDO::FETCH_ASSOC)['Value'] ?? null;
                 $uptime = $pdo->query("SHOW STATUS LIKE 'Uptime'")->fetch(PDO::FETCH_ASSOC)['Value'] ?? null;
             } catch (Throwable $e) { /* ignore */ }
-            $dbDiag = [ 'database' => $dbName, 'version' => $version, 'threads_connected' => $threads, 'uptime' => $uptime ];
+            try {
+                if ($dbName) {
+                    $stmt = $pdo->prepare("SELECT SUM(data_length + index_length) AS size FROM information_schema.TABLES WHERE table_schema = :db");
+                    $stmt->execute([':db' => $dbName]);
+                    $sizeBytes = (int)($stmt->fetch(PDO::FETCH_ASSOC)['size'] ?? 0);
+                    // Human readable
+                    $units = ['B','KB','MB','GB','TB'];
+                    $u = 0; $s = (float)$sizeBytes;
+                    while ($s >= 1024 && $u < count($units)-1) { $s /= 1024; $u++; }
+                    $sizeHuman = number_format($s, $u === 0 ? 0 : 2) . ' ' . $units[$u];
+                }
+            } catch (Throwable $e) { /* ignore */ }
+            $dbDiag = [ 'database' => $dbName, 'version' => $version, 'threads_connected' => $threads, 'uptime' => $uptime, 'size_bytes' => $sizeBytes, 'size_human' => $sizeHuman ];
         } catch (Throwable $e) {
             $dbDiag = [ 'error' => $e->getMessage() ];
         }

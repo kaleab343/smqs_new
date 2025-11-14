@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,12 +25,20 @@ export default function ReceptionistCheckInPage() {
 
   const [searchTerm, setSearchTerm] = useState("")
   const [showCheckInModal, setShowCheckInModal] = useState(false)
+  const searchParams = useSearchParams()
+  useEffect(() => {
+    try {
+      const open = searchParams?.get('open')
+      if (open === '1' || open === 'true' || open === 'yes') {
+        setShowCheckInModal(true)
+      }
+    } catch {}
+  }, [searchParams])
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     doctorId: "" as number | "",
     doctorName: "",
-    reason: "",
   })
 
   const toTime = (scheduled: string) => {
@@ -292,8 +301,8 @@ export default function ReceptionistCheckInPage() {
       </Card>
 
       {showCheckInModal && (
-        <div className="fixed inset-0 backdrop-blur-md bg-black/20 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md">
+        <div className="fixed inset-0 backdrop-blur-md bg-black/20 flex items-center justify-center z-50" onClick={() => setShowCheckInModal(false)}>
+          <Card className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <CardHeader className="flex items-center justify-between">
               <div>
                 <CardTitle>Check In New Patient</CardTitle>
@@ -342,14 +351,6 @@ export default function ReceptionistCheckInPage() {
                       </option>
                     ))}
                 </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Reason for Visit</label>
-                <Input
-                  value={formData.reason}
-                  onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-                  placeholder="Enter reason for visit"
-                />
               </div>
               <div className="flex gap-2">
                 <Button onClick={handleSubmitCheckIn} disabled={submitting} className="flex-1 bg-amber-600 hover:bg-amber-700 disabled:opacity-60">

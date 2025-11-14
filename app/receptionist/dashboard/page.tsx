@@ -186,7 +186,7 @@ export default function ReceptionistDashboard() {
               className="w-full bg-amber-600 hover:bg-amber-700"
               onClick={() => {
                 console.log("[v0] Navigating to check-in page")
-                window.location.href = "/receptionist/check-in"
+                window.location.href = "/receptionist/check-in?open=1"
               }}
             >
               Check In Patient

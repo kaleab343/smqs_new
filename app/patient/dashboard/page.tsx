@@ -68,7 +68,12 @@ export default function PatientDashboard() {
       }
     }
     const msg = last ? await last.text().catch(() => '') : ''
-    throw new Error(`POST failed ${relPath}: ${last?.status || ''} ${msg}`)
+    let friendly = msg
+    try {
+      const obj = msg ? JSON.parse(msg) : null
+      if (obj && (obj.error || obj.message)) friendly = obj.error || obj.message
+    } catch {}
+    throw new Error(friendly || 'Request failed')
   }
 
   const { user } = useAuth()
@@ -83,19 +88,28 @@ export default function PatientDashboard() {
   const [isQueued, setIsQueued] = useState(false)
   const [isPending, setIsPending] = useState(false)
   const [hasAppointment, setHasAppointment] = useState(false)
+  const [nextApptAt, setNextApptAt] = useState<string | null>(null)
+  const [countdown, setCountdown] = useState<string>("")
+  const [patientStatus, setPatientStatus] = useState<string>("")
+  const [patientsAhead, setPatientsAhead] = useState<number>(0)
 
   // Specialization modal state
   const [specOpen, setSpecOpen] = useState(false)
   const [specs, setSpecs] = useState<Array<{ id: string; name: string }>>([])
   const [selectedSpec, setSelectedSpec] = useState<string>("")
+  const [doctorsBySpec, setDoctorsBySpec] = useState<Array<{ doctor_id: number; name: string; specialization?: string; status?: string }>>([])
+  const [selectedDoctorId, setSelectedDoctorId] = useState<number | "">("")
+  const [loadingDoctors, setLoadingDoctors] = useState(false)
 
   // Load real queue metrics from backend and current pending state for this user
   useEffect(() => {
     let cancelled = false
     async function load() {
+      let q: any[] = []
       try {
-        const q = await fetchJsonWithFallback("/queue")
-        const total = Array.isArray(q) ? q.length : 0
+        const qres = await fetchJsonWithFallback("/queue")
+        q = Array.isArray(qres) ? qres : []
+        const total = q.length
         if (!cancelled) {
           setMetrics((prev) => ({ ...prev, totalInQueue: total }))
         }
@@ -103,26 +117,70 @@ export default function PatientDashboard() {
         console.warn("Failed to load queue metrics", e)
       }
       try {
-        // If we have a logged-in user, query current appointment
-        const uid = (typeof window !== 'undefined') ? JSON.parse(localStorage.getItem('smqs-user') || '{}')?.id : undefined
+        // If we have a logged-in user, query current/next appointment
+        const stored = (typeof window !== 'undefined') ? JSON.parse(localStorage.getItem('smqs-user') || '{}') : {}
+        const uid = stored?.id
         if (uid) {
-          // We need patient_id; backend requires patient_id
-          // Try proxy endpoint which expects patient_id query
           const current = await fetchJsonWithFallback(`/appointments/current?user_id=${encodeURIComponent(uid)}`)
-          const status = current?.status || ''
-          if (!cancelled) {
-            const pending = status === 'pending'
-            setIsPending(pending)
+          const appt = (current && (current.appointment || current)) || null
+          const qinfo = (current && (current.queue || null)) || null
+          const status = String(appt?.status || current?.status || '')
+          const when = (appt?.scheduled_time || current?.scheduled_time || current?.time || current?.appointment_time || null)
+          const pos = typeof qinfo?.position === 'number' ? qinfo.position : (qinfo?.position ? Number(qinfo.position) : 0)
+          const doctorId = appt?.doctor_id || current?.doctor_id || null
+          // Compute patients ahead for the same doctor only
+          let aheadByDoctor = 0
+          if (Array.isArray(q) && doctorId && pos > 0) {
+            aheadByDoctor = q.filter((row: any) => Number(row.position) < pos && Number(row.doctor_id) === Number(doctorId)).length
           }
+          if (!cancelled) {
+            const activeStatuses = ['pending','waiting','called','in-consultation']
+            setIsPending(activeStatuses.includes(status))
+            setPatientStatus(status)
+            setPatientsAhead((status === 'in-consultation' || status === 'pending') ? 0 : aheadByDoctor)
+            if (when) {
+              setHasAppointment(true)
+              setNextApptAt(when)
+            } else {
+              setHasAppointment(false)
+              setNextApptAt(null)
+            }
+          }
+        } else {
+          if (!cancelled) { setHasAppointment(false); setNextApptAt(null); setPatientStatus(''); setPatientsAhead(0) }
         }
       } catch (e) {
         console.warn('Failed to load current appointment for user', e)
+        if (!cancelled) { setHasAppointment(false); setNextApptAt(null); setPatientStatus(''); setPatientsAhead(0) }
       }
     }
     load()
     const t = setInterval(load, 30_000) // refresh periodically
     return () => { cancelled = true; clearInterval(t) }
   }, [])
+
+  // Live countdown to next appointment
+  useEffect(() => {
+    if (!nextApptAt) { setCountdown(""); return }
+    let stop = false
+    const toTs = Date.parse(nextApptAt)
+    const tick = () => {
+      if (stop) return
+      const now = Date.now()
+      const diff = Math.max(0, toTs - now)
+      const h = Math.floor(diff / 3600000)
+      const m = Math.floor((diff % 3600000) / 60000)
+      const s = Math.floor((diff % 60000) / 1000)
+      const parts = [] as string[]
+      if (h > 0) parts.push(`${h}h`)
+      parts.push(`${m}m`)
+      parts.push(`${s}s`)
+      setCountdown(parts.join(" "))
+    }
+    tick()
+    const iv = setInterval(tick, 1000)
+    return () => { stop = true; clearInterval(iv) }
+  }, [nextApptAt])
 
   const handleOpenSpec = async () => {
     setSpecOpen(true)
@@ -134,16 +192,42 @@ export default function PatientDashboard() {
     }
   }
 
-  const handleConfirmJoin = async () => {
-    if (!selectedSpec) return
-    try {
-      // Find a doctor by specialization
-      const docs = await fetchJsonWithFallback(`/doctors?specialization=${encodeURIComponent(selectedSpec)}`)
-      const doctorId = Array.isArray(docs) && docs[0]?.doctor_id ? Number(docs[0].doctor_id) : null
-      if (!doctorId) throw new Error('No doctor available for the selected specialization')
+  // Load active doctors when specialization changes
+  useEffect(() => {
+    const run = async () => {
+      if (!specOpen || !selectedSpec) { setDoctorsBySpec([]); setSelectedDoctorId(""); return }
+      try {
+        setLoadingDoctors(true)
+        const docs = await fetchJsonWithFallback(`/doctors?specialization=${encodeURIComponent(selectedSpec)}`)
+        if (Array.isArray(docs)) {
+          const act = docs.filter((d: any) => String(d.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+          setDoctorsBySpec(act)
+          // preselect first
+          setSelectedDoctorId(act[0]?.doctor_id ?? "")
+        } else {
+          setDoctorsBySpec([])
+          setSelectedDoctorId("")
+        }
+      } catch (e) {
+        console.warn('Failed to load doctors for specialization', e)
+        setDoctorsBySpec([])
+        setSelectedDoctorId("")
+      } finally {
+        setLoadingDoctors(false)
+      }
+    }
+    run()
+  }, [specOpen, selectedSpec])
 
+  const handleConfirmJoin = async () => {
+    if (!selectedSpec) { alert('Please select a specialization'); return }
+    const doctorId = selectedDoctorId ? Number(selectedDoctorId) : NaN
+    if (!doctorId || Number.isNaN(doctorId)) { alert('Please select a doctor'); return }
+    try {
       const nowPlus5 = new Date(Date.now() + 5 * 60 * 1000)
-      const scheduled_time = nowPlus5.toISOString().slice(0,19).replace('T',' ')
+      // Format as local time (YYYY-MM-DD HH:MM:SS) to match backend expectation
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const scheduled_time = `${nowPlus5.getFullYear()}-${pad(nowPlus5.getMonth()+1)}-${pad(nowPlus5.getDate())} ${pad(nowPlus5.getHours())}:${pad(nowPlus5.getMinutes())}:${pad(nowPlus5.getSeconds())}`
 
       const stored = (typeof window !== 'undefined') ? JSON.parse(localStorage.getItem('smqs-user') || '{}') : {}
       const name = stored?.name || user?.name || ''
@@ -156,7 +240,7 @@ export default function PatientDashboard() {
         if (email) payload.email = email
       }
 
-      const data = await postWithFallback('/appointments', payload)
+      await postWithFallback('/appointments', payload)
 
       // Mark state as pending and queued, refresh metrics
       setIsQueued(true)
@@ -201,7 +285,13 @@ export default function PatientDashboard() {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Current Status</CardTitle>
-            <CardDescription>{isQueued ? "You are in the queue" : "Not currently in queue"}</CardDescription>
+            <CardDescription>
+              {hasAppointment && nextApptAt ? (
+                <>Next appointment in <span className="font-semibold text-gray-900">{countdown}</span></>
+              ) : (
+                <>No appointments booked</>
+              )}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {isQueued ? (
@@ -239,8 +329,8 @@ export default function PatientDashboard() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
-              <span className="text-sm text-gray-600">Total in Queue:</span>
-              <span className="font-bold text-lg text-gray-900">{metrics.totalInQueue}</span>
+              <span className="text-sm text-gray-600">Patients ahead of you:</span>
+              <span className="font-bold text-lg text-gray-900">{(patientStatus === 'in-consultation' || patientStatus === 'pending') ? 'You are with the doctor now' : (patientStatus === 'completed' ? 'Completed service' : patientsAhead)}</span>
             </div>
           </CardContent>
         </Card>
@@ -273,7 +363,7 @@ export default function PatientDashboard() {
           </DialogHeader>
 
           <div className="space-y-3">
-            <Select value={selectedSpec} onValueChange={setSelectedSpec}>
+            <Select value={selectedSpec} onValueChange={(v) => { setSelectedSpec(v); setSelectedDoctorId("") }}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select specialization" />
               </SelectTrigger>
@@ -285,6 +375,23 @@ export default function PatientDashboard() {
                 ))}
               </SelectContent>
             </Select>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Doctor</label>
+              <select
+                value={String(selectedDoctorId)}
+                onChange={(e) => setSelectedDoctorId(e.target.value ? Number(e.target.value) : "")}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!selectedSpec || loadingDoctors}
+              >
+                <option value="">{loadingDoctors ? 'Loading doctors...' : (!selectedSpec ? 'Select specialization first' : (doctorsBySpec.length ? 'Select a doctor' : 'No active doctors'))}</option>
+                {doctorsBySpec.map((d) => (
+                  <option key={d.doctor_id} value={d.doctor_id}>
+                    {d.name}{d.specialization ? ` (${d.specialization})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <DialogFooter>

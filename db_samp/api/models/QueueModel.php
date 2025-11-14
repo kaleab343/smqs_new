@@ -112,9 +112,12 @@ class QueueModel {
      * Return the full queue ordered by position ascending.
      */
     public function listAll(): array {
-        $tbl = Database::table('queue');
-        $sql = "SELECT q.queue_id, q.appointment_id, q.queue_number, q.position
-                FROM {$tbl} q
+        $queueTbl = Database::table('queue');
+        $apptTbl = Database::table('appointments');
+        // Include doctor_id by joining appointments so frontend can filter by doctor
+        $sql = "SELECT q.queue_id, q.appointment_id, q.queue_number, q.position, a.doctor_id
+                FROM {$queueTbl} q
+                LEFT JOIN {$apptTbl} a ON a.appointment_id = q.appointment_id
                 ORDER BY q.position ASC";
         $stmt = $this->db->query($sql);
         return $stmt->fetchAll();

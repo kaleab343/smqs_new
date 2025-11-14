@@ -54,6 +54,7 @@ export default function LogsPage() {
               <div><strong>DB:</strong> {meta.db.database || '-'} ({meta.db.version || '-'})</div>
               <div><strong>Threads Connected:</strong> {meta.db.threads_connected ?? '-'}</div>
               <div><strong>Uptime:</strong> {meta.db.uptime ?? '-'}</div>
+              <div><strong>DB Size:</strong> {meta.db.size_human || (meta.db.size_bytes != null ? `${meta.db.size_bytes} B` : '-')}</div>
             </div>
           )}
           {meta?.server && (

@@ -44,7 +44,7 @@ class AppointmentModel
                 FROM {$appt} a
                 LEFT JOIN {$queue} q ON q.appointment_id = a.appointment_id
                 LEFT JOIN {$docs} d ON d.doctor_id = a.doctor_id
-                WHERE a.patient_id = :pid AND (a.status = 'pending' OR a.status = 'scheduled')
+                WHERE a.patient_id = :pid AND a.status IN ('pending','waiting','called','in-consultation')
                 ORDER BY a.scheduled_time DESC, a.appointment_id DESC
                 LIMIT 1";
         $stmt = $this->db->prepare($sql);

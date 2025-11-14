@@ -53,6 +53,7 @@ export default function ReceptionistAppointmentsPage() {
   const [doctors, setDoctors] = useState<Array<{ doctor_id: number; name: string; specialization?: string; status?: string }>>([])
   const [loadingDoctors, setLoadingDoctors] = useState(false)
   const [appointments, setAppointments] = useState<Appointment[]>([])
+  const [searchTerm, setSearchTerm] = useState("")
 
   const [showNewModal, setShowNewModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -362,8 +363,22 @@ export default function ReceptionistAppointmentsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>All Appointments</CardTitle>
-          <CardDescription>View and manage all scheduled appointments</CardDescription>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <CardTitle>All Appointments</CardTitle>
+              <CardDescription>View and manage all scheduled appointments</CardDescription>
+            </div>
+            <div className="relative w-full md:w-80">
+              <input
+                type="text"
+                className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                placeholder="Search by any field..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              <svg className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z"></path></svg>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -380,7 +395,21 @@ export default function ReceptionistAppointmentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {appointments.map((apt) => (
+                {appointments
+                  .filter((apt) => {
+                    if (!searchTerm.trim()) return true
+                    const q = searchTerm.toLowerCase()
+                    return (
+                      apt.id.toLowerCase().includes(q) ||
+                      apt.patient.toLowerCase().includes(q) ||
+                      (apt.patientEmail || '').toLowerCase().includes(q) ||
+                      apt.doctor.toLowerCase().includes(q) ||
+                      apt.date.toLowerCase().includes(q) ||
+                      apt.time.toLowerCase().includes(q) ||
+                      apt.status.toLowerCase().includes(q)
+                    )
+                  })
+                  .map((apt) => (
                   <tr key={apt.id} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-3 px-4 font-mono text-sm bg-gray-100 px-2 py-1 rounded text-gray-700">
                       {apt.id}
