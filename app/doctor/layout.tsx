@@ -15,35 +15,65 @@ export default function DoctorLayout({
   const { user, logout } = useAuth()
   const router = useRouter()
 
-  // Doctor availability state
-  const [isActive, setIsActive] = useState<boolean>(true)
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem('smqs-doctor-active')
-      if (v != null) setIsActive(v === '1')
-    } catch {}
-  }, [])
-  // Persist local state only
-  useEffect(() => {
-    try {
-      localStorage.setItem('smqs-doctor-active', isActive ? '1' : '0')
-    } catch {}
-  }, [isActive])
+  // Cookie helpers
+  const getCookie = (name: string) => {
+    if (typeof document === 'undefined') return null
+    const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()\[\]\\\/\+^])/g, '\\$1') + '=([^;]*)'))
+    return m ? decodeURIComponent(m[1]) : null
+  }
+  const setCookie = (name: string, value: string, days = 30) => {
+    if (typeof document === 'undefined') return
+    const maxAge = days * 24 * 60 * 60
+    document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}`
+  }
 
-  // Track when we've loaded initial state and only send updates on explicit toggle
+  // Doctor availability state
+  const [isActive, setIsActive] = useState<boolean>(false)
+  // Track when we've loaded initial server state and only send updates on explicit toggle
   const [loaded, setLoaded] = useState(false)
   const prevIsActiveRef = useRef<boolean | null>(null)
 
+  // On mount, fetch the doctor's current status from the server (source of truth)
   useEffect(() => {
-    // Mark as loaded after initial localStorage sync has run
-    setLoaded(true)
-  }, [])
+    let cancelled = false
+    const load = async () => {
+      try {
+        if (!user?.email) return
+        // Fetch from server (source of truth)
+        const r = await fetch('/api/php/doctors', { cache: 'no-store' }) // Next.js proxy with no-store headers
+        const doctors = r.ok ? await r.json() : []
+        const email = String(user.email).toLowerCase()
+        const found = (doctors || []).find((d: any) => String(d.email || '').toLowerCase() === email)
+        const raw = String(found?.status || '').toUpperCase()
+        const active = raw === 'ACTIVE'
+        if (!cancelled) {
+          setIsActive(active)
+          // Initialize previous value without sending to backend
+          prevIsActiveRef.current = active
+          setCookie('smqs-doctor-active', active ? '1' : '0')
+          setLoaded(true)
+        }
+      } catch (e) {
+        // If server fetch fails, fall back to cookie; if cookie missing, default to INACTIVE
+        if (!cancelled) {
+          const cookieVal = getCookie('smqs-doctor-active')
+          const active = cookieVal === '1' ? true : false
+          setIsActive(active)
+          prevIsActiveRef.current = active
+          setLoaded(true)
+        }
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [user?.email])
+
+  // Do not persist to localStorage; always fetch from DB on mount
 
   useEffect(() => {
-    // Only send update when isActive actually changes after load
+    // Only send update when isActive actually changes after initial server load
     if (!loaded) return
     if (prevIsActiveRef.current === null) {
-      // Initialize previous value without sending to backend
       prevIsActiveRef.current = isActive
       return
     }
@@ -59,6 +89,8 @@ export default function DoctorLayout({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, status }),
         })
+        // sync cookie after a successful toggle
+        setCookie('smqs-doctor-active', isActive ? '1' : '0')
       } catch (e) {
         // non-fatal
         console.error('doctor status update failed', e)
