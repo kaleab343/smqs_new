@@ -31,22 +31,43 @@ export default function AppointmentsPage() {
   const [loadingDoctors, setLoadingDoctors] = useState(false)
 
   const handleEditAppointment = (id: string) => {
-    console.log("[v0] Editing appointment:", id)
     const apt = appointments.find((a) => a.id === id)
     if (apt) {
       setEditingId(id)
-      setDoctorSearch(apt.doctor)
+      // Try to map the existing doctor name to an id from the loaded doctors list
+      const match = doctors.find((d) => d.name === apt.doctor)
+      setDoctorSearch(match ? String(match.doctor_id) : '')
       setSelectedDate(apt.date)
       setSelectedTime(apt.time)
       setShowEditModal(true)
     }
   }
 
-  const handleSaveEditedAppointment = () => {
-    if (editingId && doctorSearch && selectedDate && selectedTime) {
+  const handleSaveEditedAppointment = async () => {
+    if (!(editingId && doctorSearch && selectedDate && selectedTime)) return
+
+    // Build scheduled_time
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const [y,m,d] = selectedDate.split('-').map(Number)
+    const [hh,mm] = selectedTime.split(':').map(Number)
+    const dt = new Date(y, (m||1)-1, d||1, hh||0, mm||0, 0)
+    const scheduled_time = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`
+
+    try {
+      const res = await fetch(`/api/php/appointments/update-time?id=${encodeURIComponent(editingId)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ scheduled_time, doctor_id: Number(doctorSearch) || undefined })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        alert(data?.error || data?.message || 'Failed to update appointment')
+        return
+      }
+      // Update local state
       setAppointments((prev) =>
         prev.map((apt) =>
-          apt.id === editingId ? { ...apt, doctor: doctorSearch, date: selectedDate, time: selectedTime } : apt,
+          apt.id === editingId ? { ...apt, doctor: (doctors.find(d => String(d.doctor_id) === doctorSearch)?.name || apt.doctor), date: selectedDate, time: selectedTime } : apt,
         ),
       )
       setShowEditModal(false)
@@ -54,12 +75,33 @@ export default function AppointmentsPage() {
       setDoctorSearch("")
       setSelectedDate("")
       setSelectedTime("")
-      console.log("[v0] Appointment updated successfully")
+    } catch (e: any) {
+      alert(e?.message || 'Failed to update appointment')
     }
   }
 
-  const handleCancel = (id: string) => {
-    setAppointments((prev) => prev.map((apt) => (apt.id === id ? { ...apt, status: "cancelled" as const } : apt)))
+  const handleCancel = async (id: string) => {
+    try {
+      if (!id) return
+      // Prefer permissive delete endpoint that accepts id via query/body
+      const res = await fetch(`/api/php/appointments/delete?id=${encodeURIComponent(id)}`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data?.success === false) {
+        // Fallback to RESTful DELETE
+        const res2 = await fetch(`/api/php/appointments/${encodeURIComponent(id)}`, { method: 'DELETE' })
+        const data2 = await res2.json().catch(() => ({}))
+        if (!res2.ok || data2?.success === false) {
+          console.error('Delete failed', { primary: { status: res.status, data }, fallback: { status: res2.status, data: data2 } })
+          alert(data?.error || data2?.error || data?.message || data2?.message || 'Failed to delete appointment')
+          return
+        }
+      }
+      // Remove locally and optionally refetch can be added here
+      setAppointments((prev) => prev.filter((apt) => apt.id !== id))
+    } catch (e: any) {
+      console.error('Delete exception', e)
+      alert(e?.message || 'Failed to delete appointment')
+    }
   }
 
   useEffect(() => {

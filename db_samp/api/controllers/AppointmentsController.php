@@ -350,11 +350,17 @@ $appointment_id = $appointments->create($patient_id, $doctor_id, $normalizedTime
                 $sel = new DateTime($normalized);
                 if ($sel < $now) return Response::json(['error' => 'Cannot schedule an appointment in the past'], 400);
             } catch (Throwable $e) {}
+            $doctorId = isset($body['doctor_id']) ? (int)$body['doctor_id'] : 0;
             $pdo = Database::getConnection();
             $apptTbl = Database::table('appointments');
-            $stmt = $pdo->prepare("UPDATE {$apptTbl} SET scheduled_time = :t WHERE appointment_id = :id");
-            $ok = $stmt->execute([':t' => $normalized, ':id' => $id]);
-            return Response::json(['success' => (bool)$ok, 'appointment_id' => $id, 'scheduled_time' => $normalized]);
+            if ($doctorId > 0) {
+                $stmt = $pdo->prepare("UPDATE {$apptTbl} SET scheduled_time = :t, doctor_id = :d WHERE appointment_id = :id");
+                $ok = $stmt->execute([':t' => $normalized, ':d' => $doctorId, ':id' => $id]);
+            } else {
+                $stmt = $pdo->prepare("UPDATE {$apptTbl} SET scheduled_time = :t WHERE appointment_id = :id");
+                $ok = $stmt->execute([':t' => $normalized, ':id' => $id]);
+            }
+            return Response::json(['success' => (bool)$ok, 'appointment_id' => $id, 'scheduled_time' => $normalized, 'doctor_id' => $doctorId ?: null]);
         } catch (Throwable $e) {
             return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
         }
