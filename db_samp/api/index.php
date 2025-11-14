@@ -240,10 +240,10 @@ $router->add('GET', '/admin/stats', function () {
             try { $totalPatients = (int)$pdo->query("SELECT COUNT(*) FROM {$patientsTbl}")->fetchColumn(); } catch (Throwable $e) { /* ignore */ }
         }
 
-        // Define "active now" as users created in the last 60 minutes
+        // Define "active now" as doctors with status ACTIVE in the doctors table
         $activeNow = 0;
         try {
-            $stmt = $pdo->query("SELECT COUNT(*) FROM {$usersTbl} WHERE created_at >= (NOW() - INTERVAL 60 MINUTE)");
+            $stmt = $pdo->query("SELECT COUNT(*) FROM {$doctorsTbl} WHERE UPPER(status) = 'ACTIVE'");
             $activeNow = (int)$stmt->fetchColumn();
         } catch (Throwable $e) { $activeNow = 0; }
 
@@ -291,12 +291,30 @@ $router->add('GET', '/admin/stats', function () {
         } catch (Throwable $e) {
             // Keep default health if computation fails
         }
+        // Compute today's consultations: appointments with status = 'in-consultation' today
+        $todayConsultations = 0;
+        try {
+            $apptsTbl2 = Database::table('appointments');
+            $stmt = $pdo->query("SELECT COUNT(*) FROM {$apptsTbl2} WHERE DATE(scheduled_time) = CURDATE() AND LOWER(status) = 'in-consultation'");
+            $todayConsultations = (int)$stmt->fetchColumn();
+        } catch (Throwable $e) { $todayConsultations = 0; }
+
+        // Doctors on break (inactive)
+        $inactiveDoctors = [];
+        try {
+            $docTbl = Database::table('doctors');
+            $stmt = $pdo->query("SELECT name FROM {$docTbl} WHERE UPPER(status) = 'INACTIVE' ORDER BY name");
+            foreach ($stmt as $row) { $inactiveDoctors[] = $row['name']; }
+        } catch (Throwable $e) { $inactiveDoctors = []; }
+
         return Response::json([
             'total_users' => $totalUsers,
             'total_doctors' => $totalDoctors,
             'total_patients' => $totalPatients,
             'active_now' => $activeNow,
+            'today_consultations' => $todayConsultations,
             'health' => $health,
+            'inactive_doctors' => $inactiveDoctors,
         ]);
     } catch (Throwable $e) {
         return Response::json(['error' => $e->getMessage(), 'health' => 'bad'], 500);

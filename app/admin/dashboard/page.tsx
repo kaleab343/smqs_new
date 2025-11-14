@@ -150,6 +150,7 @@ export default function AdminDashboard() {
           todayConsultations: (data.today_consultations ?? data.active_now ?? 0),
           systemHealth: (data.health ?? 'good'),
         }))
+        setInactiveDoctors(Array.isArray(data.inactive_doctors) ? data.inactive_doctors : [])
       } catch (e) {
         console.error('Failed to load admin stats', e)
       }
@@ -159,6 +160,7 @@ export default function AdminDashboard() {
 
   const [recentActivities, setRecentActivities] = useState<ActivityLog[]>([] as ActivityLog[])
   // fetched in effect below
+  const [inactiveDoctors, setInactiveDoctors] = useState<string[]>([])
 
   const getHealthColor = (health: string) => {
     switch (health) {
@@ -290,20 +292,19 @@ export default function AdminDashboard() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <TrendingUp className="w-5 h-5" />
-              System Performance
+              Doctors on Break
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Uptime</span>
-                <span className="font-medium">99.9%</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Response Time</span>
-                <span className="font-medium">245ms</span>
-              </div>
-            </div>
+            {inactiveDoctors.length === 0 ? (
+              <p className="text-sm text-gray-600">No doctors are currently on break.</p>
+            ) : (
+              <ul className="list-disc pl-5 space-y-1">
+                {inactiveDoctors.map((name, idx) => (
+                  <li key={idx} className="text-sm text-gray-800">{name}</li>
+                ))}
+              </ul>
+            )}
           </CardContent>
         </Card>
       </div>
