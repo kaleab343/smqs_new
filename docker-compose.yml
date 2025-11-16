@@ -1,0 +1,56 @@
+version: "3.9"
+services:
+  db:
+    image: mysql:8
+    container_name: smqs_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_NAME:-smart_queue_management}
+      MYSQL_USER: ${DB_USER:-smqs}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-smqs}
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./docker/db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: smqs_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_NAME: ${DB_NAME:-smart_queue_management}
+      DB_USER: ${DB_USER:-smqs}
+      DB_PASS: ${DB_PASSWORD:-smqs}
+      DB_CHARSET: utf8mb4
+    ports:
+      - "8080:80"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: smqs_web
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+networks:
+  default:
+    name: smqs_net
