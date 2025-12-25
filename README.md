@@ -59,7 +59,7 @@ High-level architecture: Next.js frontend talks to a PHP API which in turn persi
                                               ┌──────────────────────┐
                                               │     PHP API          │
                                               │  Apache Container    │
-                                              │     (port 8080)      │
+                              P                │     (port 8080)      │
                                               └─────────┬────────────┘
                                                         │
                                                         │ PDO (MySQL)
@@ -152,8 +152,9 @@ Choose one of the two approaches:
 
 - Docker (recommended):
   1) Install Docker & Docker Compose.
-  2) From the `SMQS` folder, run: `docker compose up --build`
+  2) From the `SMQS` folder, run: `npm run docker:up` (equivalent to `docker compose up --build`)
   3) Web: http://localhost:3000 | API: http://localhost:8080 | DB: localhost:3306
+  4) Stop with `npm run docker:down` and tail logs with `npm run docker:logs`
 
 - Local (frontend-only or with self-hosted PHP):
   1) Install Node.js 20+.
@@ -208,9 +209,9 @@ docker compose up --build
 - `docker/db/init/01_schema.sql` is executed on first container start to create the necessary schema and seed data.
 
 4) Logs and lifecycle:
-- View logs: `docker compose logs -f`
-- Stop: `docker compose down`
-- Rebuild after changes: `docker compose up --build`
+- View logs: `npm run docker:logs`
+- Stop: `npm run docker:down`
+- Rebuild after changes: `npm run docker:up`
 
 5) Changing ports
 - Edit `docker-compose.yml` service `ports` mappings if 3000/8080/3306 conflict with your system.
@@ -256,16 +257,17 @@ Jest configuration is in `jest.config.json`. Tests currently focus on utilities 
 
 - Run tests:
 ```
-npx jest
+npm run test
 ```
 
-- Suggested script addition to `package.json`:
+- Watch mode:
 ```
-"scripts": {
-  "test": "jest",
-  "test:watch": "jest --watch",
-  "coverage": "jest --coverage"
-}
+npm run test:watch
+```
+
+- Coverage report:
+```
+npm run coverage
 ```
 
 - Coverage thresholds are defined globally at 50% branches/functions/lines/statements. Adjust as needed.

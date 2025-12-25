@@ -54,8 +54,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let resp: Response | null = null
       let lastErr: any = null
 
-      const attempts = (
-        isFront
+      const attempts = [
+        // Prefer same-origin proxy to avoid CORS and Windows path encoding pitfalls
+        { url: '/api/php/auth/login', opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
+        // Then try direct PHP endpoints
+        ...(isFront
           ? [
               { url: front,  opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
               { url: pretty, opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
@@ -67,8 +70,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               { url: front,  opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
               { url: pretty, opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: email, email, password }) } },
               { url: front,  opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: email, email, password }) } },
-            ]
-      )
+            ])
+      ]
 
       let lastResp: Response | null = null
       for (const a of attempts) {

@@ -5,7 +5,9 @@
 export function getPhpApiBase(): string {
   const env = (process.env.NEXT_PUBLIC_PHP_API_BASE || "").trim()
   if (env) return env.replace(/\/?$/, "")
-  // Fallback for local XAMPP path. Encode parentheses to avoid some Apache setups failing on () in URL
-  const base = "http://127.0.0.1/code_(1)/db_samp/api/index.php"
-  return base.replace("(", "%28").replace(")", "%29")
+  // Fallback for local XAMPP path based on this repo structure:
+  // htdocs/SMQS/db_samp/api/index.php
+  // Keep index.php in the path so query-style routing works in the Next.js proxy.
+  const base = "http://localhost/SMQS/db_samp/api/index.php"
+  return base
 }
