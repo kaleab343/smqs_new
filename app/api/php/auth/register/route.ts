@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
-import { buildPhpUrl } from "@/lib/php-api-config"
+import { getPhpApiBase } from "@/lib/php-api-config"
 
-async function forward(req: NextRequest, method: string) {
+async function forward(req: NextRequest) {
   try {
-    const url = buildPhpUrl('/appointments')
+    const base = getPhpApiBase().replace(/\/?$/, "") // includes index.php when using fallback
+    const url = `${base}?r=/auth/register`
 
     const headers: Record<string, string> = {}
     req.headers.forEach((v, k) => {
@@ -12,11 +13,9 @@ async function forward(req: NextRequest, method: string) {
       headers[k] = v
     })
 
-    const init: RequestInit = { method, headers }
-    if (method !== "GET" && method !== "HEAD") {
-      const body = await req.arrayBuffer()
-      init.body = Buffer.from(body)
-    }
+    const init: RequestInit = { method: "POST", headers }
+    const body = await req.arrayBuffer()
+    init.body = Buffer.from(body)
 
     const res = await fetch(url, init)
     const buf = await res.arrayBuffer()
@@ -28,5 +27,4 @@ async function forward(req: NextRequest, method: string) {
   }
 }
 
-export async function POST(req: NextRequest) { return forward(req, "POST") }
-export async function GET(req: NextRequest) { return forward(req, "GET") }
+export async function POST(req: NextRequest) { return forward(req) }

@@ -141,17 +141,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const attempts = (
         isFront
           ? [
+              // Prefer same-origin proxy to avoid CORS and localhost differences
+              { url: '/api/php/auth/register', opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
               { url: front,      opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
               { url: legacyFile, opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
               { url: pretty,     opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
+              { url: '/api/php/auth/register', opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadObj) } },
               { url: front,      opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadObj) } },
               { url: legacyFile, opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadObj) } },
               { url: pretty,     opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadObj) } },
             ]
           : [
+              { url: '/api/php/auth/register', opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
               { url: legacyFile, opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
               { url: pretty,     opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
               { url: front,      opts: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formBody } },
+              { url: '/api/php/auth/register', opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadObj) } },
               { url: pretty,     opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadObj) } },
               { url: front,      opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadObj) } },
             ]

@@ -11,3 +11,14 @@ export function getPhpApiBase(): string {
   const base = "http://localhost/SMQS/db_samp/api/index.php"
   return base
 }
+
+export function buildPhpUrl(path: string): string {
+  const base = getPhpApiBase().replace(/\/?$/, "")
+  const cleanPath = path.startsWith('/') ? path : '/' + path
+  if (/\/index\.php$/i.test(base)) {
+    // Front-controller style
+    return `${base}?r=${cleanPath}`
+  }
+  // Explicit index.php path
+  return `${base}/index.php${cleanPath}`
+}

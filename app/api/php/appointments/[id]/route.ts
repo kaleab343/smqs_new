@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getPhpApiBase } from "@/lib/php-api-config"
+import { buildPhpUrl } from "@/lib/php-api-config"
 
 async function forward(req: NextRequest, method: string, id: string) {
   try {
-    const base = getPhpApiBase().replace(/\/?$/, "") // includes index.php
-    const url = `${base}?r=/appointments/${encodeURIComponent(id)}`
+    const url = buildPhpUrl(`/appointments/${encodeURIComponent(id)}`)
 
     const headers: Record<string, string> = {}
     req.headers.forEach((v, k) => {

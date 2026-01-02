@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getPhpApiBase } from "@/lib/php-api-config"
+import { buildPhpUrl } from "@/lib/php-api-config"
 
 export async function GET(req: NextRequest) {
   try {
-    const base = getPhpApiBase().replace(/\/?$/, "") // includes index.php
     // Forward query params (e.g., patient_id)
     const inUrl = new URL(req.url)
     const search = inUrl.search ? inUrl.search : ""
-    const url = `${base}?r=/appointments/current${search}`
+    const url = buildPhpUrl('/appointments/current') + search
 
     const res = await fetch(url, { method: 'GET' })
     const buf = await res.arrayBuffer()
