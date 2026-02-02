@@ -1,0 +1,27 @@
+# Ignore Next.js files for backend deployment
+node_modules/
+.next/
+app/
+components/
+hooks/
+lib/
+public/
+styles/
+__tests__/
+*.json
+!render.yaml
+*.md
+!RENDER-*.md
+.git/
+.env*
+!.env.render.template
+legacy/
+scripts/
+Dockerfile.web
+docker-compose.yml
+middleware.ts
+next.config.mjs
+postcss.config.mjs
+tsconfig.json
+jest.config.json
+jest.setup.js

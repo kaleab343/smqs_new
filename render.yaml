@@ -5,12 +5,11 @@ services:
   - type: web
     name: smqs-api
     env: docker
-    dockerfilePath: ./Dockerfile.render
+    dockerfilePath: ./render.dockerfile
+    dockerContext: .
     plan: free
     region: oregon
     branch: main
-    buildCommand: ""
-    startCommand: ""
     envVars:
       - key: APP_ENV
         value: production
