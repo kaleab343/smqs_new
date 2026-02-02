@@ -1,0 +1,13 @@
+RewriteEngine On
+
+# Handle CORS preflight quickly
+RewriteCond %{REQUEST_METHOD} =OPTIONS
+RewriteRule ^ - [R=204,L]
+
+# Allow installer to be accessed directly
+RewriteRule ^install\.php$ - [L]
+
+# Route everything to index.php (works in subfolders too)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]

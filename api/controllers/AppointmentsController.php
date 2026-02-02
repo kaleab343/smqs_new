@@ -1,0 +1,456 @@
+<?php
+
+require_once __DIR__ . '/../core/Response.php';
+require_once __DIR__ . '/../core/Database.php';
+require_once __DIR__ . '/../models/AppointmentModel.php';
+require_once __DIR__ . '/../models/QueueModel.php';
+require_once __DIR__ . '/../models/UserModel.php';
+require_once __DIR__ . '/../models/PatientModel.php';
+
+class AppointmentsController
+{
+    private function updateStatus(int $id, string $status): bool
+    {
+        $pdo = Database::getConnection();
+        $tbl = Database::table('appointments');
+        $stmt = $pdo->prepare("UPDATE {$tbl} SET status = :s WHERE appointment_id = :id");
+        return $stmt->execute([':s' => $status, ':id' => $id]);
+    }
+    private function readBody(): array
+    {
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+        $isJson = stripos($contentType, 'application/json') !== false;
+        if ($isJson) {
+            $body = json_decode(file_get_contents('php://input'), true) ?? [];
+        } else {
+            $body = $_POST ?: (json_decode(file_get_contents('php://input'), true) ?? []);
+        }
+        return is_array($body) ? $body : [];
+    }
+
+    private function normalizeDateTime(string $input): ?string
+    {
+        $t = trim($input);
+        if ($t === '') return null;
+        // Replace T with space from datetime-local inputs
+        $t = str_replace('T', ' ', $t);
+        // If it looks like YYYY-MM-DD HH:MM (no seconds), append :00
+        if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $t)) {
+            $t .= ':00';
+        }
+        // Accept exactly 'YYYY-MM-DD HH:MM:SS' and return as-is to preserve user selection
+        if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $t)) {
+            return $t;
+        }
+        return null;
+    }
+
+    public function list()
+    {
+        try {
+            $pdo = Database::getConnection();
+            $appt = Database::table('appointments');
+            $patients = Database::table('patients');
+            $doctors = Database::table('doctors');
+            $user_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : 0;
+            $patient_id = isset($_GET['patient_id']) ? (int)$_GET['patient_id'] : 0;
+            $futureOnly = isset($_GET['future_only']) ? (int)$_GET['future_only'] : 0;
+
+            $where = [];
+            $params = [];
+            if ($patient_id > 0) {
+                // Prefer filtering by explicit patient_id
+                $where[] = 'a.patient_id = :pid';
+                $params[':pid'] = $patient_id;
+            } elseif ($user_id > 0) {
+                // Otherwise filter by the patient's user_id mapping
+                $where[] = 'p.user_id = :uid';
+                $params[':uid'] = $user_id;
+            }
+            if ($futureOnly) {
+                $where[] = 'a.scheduled_time > NOW()';
+                $where[] = "a.status <> 'cancelled'";
+            }
+            $whereSql = count($where) ? ('WHERE ' . implode(' AND ', $where)) : '';
+
+            $sql = "SELECT a.appointment_id, a.patient_id, a.doctor_id, a.scheduled_time, a.status, a.queue_number,
+                           p.name AS patient_name, p.email AS patient_email,
+                           d.name AS doctor_name, d.specialization
+                    FROM {$appt} a
+                    LEFT JOIN {$patients} p ON p.patient_id = a.patient_id
+                    LEFT JOIN {$doctors} d ON d.doctor_id = a.doctor_id
+                    {$whereSql}
+                    ORDER BY a.scheduled_time ASC, a.appointment_id DESC";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll();
+            return Response::json($rows);
+        } catch (Throwable $e) {
+            return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
+        }
+    }
+
+    public function create()
+    {
+        try {
+            $body = $this->readBody();
+            $pdo = Database::getConnection();
+
+           $patient_id = (int)($body['patient_id'] ?? 0);
+           $user_id = (int)($body['user_id'] ?? 0);
+           $doctor_id = (int)($body['doctor_id'] ?? 0);
+           $timeRaw = (string)($body['scheduled_time'] ?? '');
+           $normalizedTime = $this->normalizeDateTime($timeRaw);
+
+           // Accept patient details for auto-create when patient_id is missing or not found
+           $patientName = trim((string)($body['name'] ?? $body['patient_name'] ?? ''));
+           $patientEmail = trim((string)($body['email'] ?? $body['patient_email'] ?? ''));
+           $patientPhone = trim((string)($body['phone'] ?? $body['patient_phone'] ?? ''));
+
+            if (!$doctor_id) {
+                return Response::json(['error' => 'Missing doctor_id'], 400);
+            }
+            if (!$normalizedTime) {
+                return Response::json(['error' => 'Invalid scheduled_time format'], 400);
+            }
+            // Disallow scheduling in the past (date or time before now)
+            try {
+                $now = new DateTime('now');
+                $sel = new DateTime($normalizedTime);
+                if ($sel < $now) {
+                    return Response::json(['error' => 'Cannot schedule an appointment in the past'], 400);
+                }
+            } catch (Throwable $e) { /* ignore parse errors already handled */ }
+
+            // Validate doctor exists
+            $doctorsTbl = Database::table('doctors');
+            $stmt = $pdo->prepare("SELECT doctor_id, status FROM {$doctorsTbl} WHERE doctor_id = :id LIMIT 1");
+            $stmt->execute([':id' => $doctor_id]);
+            $docRow = $stmt->fetch();
+            if (!$docRow) {
+                return Response::json(['error' => 'Invalid doctor_id (not found)'], 400);
+            }
+
+            $autoCreatedPatient = false;
+            $patientsTbl = Database::table('patients');
+
+            $pdo->beginTransaction();
+            try {
+                // If patient_id is provided, verify it exists; otherwise auto-create if details provided
+                if ($patient_id > 0) {
+                    $stmt = $pdo->prepare("SELECT patient_id FROM {$patientsTbl} WHERE patient_id = :pid LIMIT 1");
+                    $stmt->execute([':pid' => $patient_id]);
+                    $pRow = $stmt->fetch();
+                    if (!$pRow) {
+                        // Allow auto-create when patient_id invalid but details provided
+                        if (!$patientName && !$patientEmail) {
+                            $pdo->rollBack();
+                            return Response::json(['error' => 'Invalid patient_id (not found) and missing patient details for auto-create'], 400);
+                        }
+                        $patient_id = 0; // force auto-create
+                    }
+                }
+
+                if ($patient_id === 0) {
+                    // If we have user_id, try to map to patient_id
+                    if ($user_id > 0) {
+                        $pt = Database::table('patients');
+                        $stmt = $pdo->prepare("SELECT patient_id FROM {$pt} WHERE user_id = :uid LIMIT 1");
+                        $stmt->execute([':uid' => $user_id]);
+                        $row = $stmt->fetch();
+                        if ($row && isset($row['patient_id'])) {
+                            $patient_id = (int)$row['patient_id'];
+                        }
+                    }
+                    // If we have an email, try to find an existing patient first
+                    if ($patient_id === 0 && $patientEmail) {
+                        $patients = new PatientModel();
+                        $existing = $patients->findByEmail($patientEmail);
+                        if ($existing && isset($existing['patient_id'])) {
+                            // If a patient exists with this email, ensure provided name matches the stored name
+                            if ($patientName !== '') {
+                                $provided = strtolower(trim($patientName));
+                                $stored = strtolower(trim((string)($existing['name'] ?? '')));
+                                if ($stored !== '' && $provided !== '' && $provided !== $stored) {
+                                    // Do not block creation on name mismatch; prefer existing patient's name
+                                    $patientName = (string)($existing['name'] ?? $patientName);
+                                }
+                            }
+                            $patient_id = (int)$existing['patient_id'];
+                        }
+                    }
+
+                    if ($patient_id === 0) {
+                        // Must have an email because both users.email and patients.email are NOT NULL and UNIQUE
+                        if (!$patientEmail) {
+                            $pdo->rollBack();
+                            return Response::json(['error' => 'Missing patient email'], 400);
+                        }
+                        // Name is optional but recommended
+                        if (!$patientName) {
+                            $patientName = $patientEmail;
+                        }
+
+                        // Try to reuse existing user by email
+                        $users = new UserModel();
+                        $existingUserId = null;
+                        if ($patientEmail) {
+                            $u = $users->findByUsernameOrEmail($patientEmail);
+                            if ($u && isset($u['user_id'])) { $existingUserId = (int)$u['user_id']; }
+                        }
+                        if ($existingUserId) {
+                            // Do not allow booking if the email belongs to a user with doctor role
+                            if (isset($u['role']) && strtolower((string)$u['role']) === 'doctor') {
+                                $pdo->rollBack();
+                                return Response::json(['error' => 'User with this email is a doctor and cannot be booked as a patient'], 400);
+                            }
+                            $userId = $existingUserId;
+                        } else {
+                            // Create user with unique username
+                            $baseUsername = $patientName ?: ($patientEmail ?: 'patient');
+                            $tryUsername = $baseUsername;
+                            $suffix = 1;
+                            while ($users->findByUsernameOrEmail($tryUsername)) {
+                                $suffix++;
+                                $tryUsername = $baseUsername . $suffix;
+                            }
+                            $userId = $users->createUser([
+                                'username' => $tryUsername,
+                                'password' => '0000', // NOTE: plain for demo
+                                'role' => 'patient',
+                                'email' => $patientEmail ?: null,
+                            ]);
+                        }
+                        // Create patient row
+                        $patients = $patients ?? new PatientModel();
+                        $patient_id = $patients->create([
+                            'user_id' => $userId,
+                            'name' => $patientName ?: ($patientEmail ?: 'patient'),
+                            'email' => $patientEmail ?: null,
+                            'phone' => $patientPhone ?: '-',
+                        ]);
+                        $autoCreatedPatient = true;
+                    }
+                }
+
+                // Validate: patient must not be a doctor user
+                try {
+                    $usersTbl = Database::table('users');
+                    $patientsTbl = Database::table('patients');
+                    $stmtChk = $pdo->prepare("SELECT u.role FROM {$patientsTbl} p JOIN {$usersTbl} u ON u.user_id = p.user_id WHERE p.patient_id = :pid LIMIT 1");
+                    $stmtChk->execute([':pid' => $patient_id]);
+                    $r = $stmtChk->fetch();
+                    if ($r && strtolower((string)($r['role'] ?? '')) === 'doctor') {
+                        $pdo->rollBack();
+                        return Response::json(['error' => 'Doctors cannot be booked as patients'], 400);
+                    }
+                } catch (Throwable $e) { /* ignore, will proceed; other checks exist */ }
+
+                // Block creating a new appointment if patient already has an active one in 'pending' or 'in-consultation'
+                try {
+                    $apptTbl = Database::table('appointments');
+                    $stmtDup = $pdo->prepare("SELECT COUNT(1) AS c FROM {$apptTbl} WHERE patient_id = :pid AND status IN ('pending','waiting','in-consultation')");
+                    $stmtDup->execute([':pid' => $patient_id]);
+                    $dupCount = (int)($stmtDup->fetch()['c'] ?? 0);
+                    if ($dupCount > 0) {
+                        $pdo->rollBack();
+                        return Response::json(['error' => "Patient already has an active appointment (status pending or in-consultation)", 'code' => 'active_appointment_exists'], 400);
+                    }
+                } catch (Throwable $e) { /* ignore - default to allowing if check fails */ }
+
+                // Create appointment and queue records
+                $appointments = new AppointmentModel();
+                $queue = new QueueModel();
+                $queueNum = $queue->nextQueueNumber();
+                // If the doctor is currently assigned to other patients (has active queue/appointments), and we auto-created this patient,
+// then mark this new appointment as 'waiting'; otherwise leave as 'pending'.
+$apptTbl = Database::table('appointments');
+// Determine initial status: if doctor has no patient currently in-consultation, start this one as in-consultation; otherwise waiting
+$stmtBusy = $pdo->prepare("SELECT COUNT(1) AS c FROM {$apptTbl} WHERE doctor_id = :did AND status = 'in-consultation'");
+$stmtBusy->execute([':did' => $doctor_id]);
+$busyCount = (int)($stmtBusy->fetch()['c'] ?? 0);
+$doctorHasInConsult = $busyCount > 0;
+$initialStatus = $doctorHasInConsult ? 'waiting' : 'in-consultation';
+$appointment_id = $appointments->create($patient_id, $doctor_id, $normalizedTime, $initialStatus, $queueNum);
+                $queue->enqueue($appointment_id, $queueNum, null);
+
+                $pdo->commit();
+                return Response::json([
+                    'appointment_id' => $appointment_id,
+                    'queue_number' => $queueNum,
+                    'scheduled_time' => $normalizedTime,
+                    'status' => $initialStatus,
+                    'patient_id' => $patient_id,
+                    'auto_created_patient' => $autoCreatedPatient,
+                ], 201);
+            } catch (PDOException $e) {
+                $pdo->rollBack();
+                $code = $e->getCode();
+                $msg = $e->getMessage();
+                if ($code === '23000') { // SQLSTATE constraint violation
+                    return Response::json(['error' => 'DB constraint violation', 'details' => $msg], 400);
+                }
+                return Response::json(['error' => 'DB error', 'details' => $msg], 500);
+            } catch (Throwable $e) {
+                $pdo->rollBack();
+                return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
+            }
+        } catch (Throwable $e) {
+            return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
+        }
+    }
+
+    public function delete(int $id)
+    {
+        $appointments = new AppointmentModel();
+        $queue = new QueueModel();
+        $queue->removeByAppointment($id);
+        $ok = $appointments->delete($id);
+        return Response::json(['success' => $ok]);
+    }
+
+    public function complete(int $id)
+    {
+        try {
+            $appointments = new AppointmentModel();
+            $queue = new QueueModel();
+            // Look up doctor_id for this appointment
+            $pdo = Database::getConnection();
+            $apptTbl = Database::table('appointments');
+            $stmt = $pdo->prepare("SELECT doctor_id FROM {$apptTbl} WHERE appointment_id = :id LIMIT 1");
+            $stmt->execute([':id' => $id]);
+            $row = $stmt->fetch();
+            $doctor_id = $row && isset($row['doctor_id']) ? (int)$row['doctor_id'] : null;
+
+            // Update status to completed and remove from queue
+            $ok = $this->updateStatus($id, 'completed');
+            $queue->removeByAppointment($id);
+
+            // Auto-assign next patient to this doctor
+            $promoted = null;
+            if ($doctor_id) {
+                try { $promoted = $queue->promoteNextForDoctor($doctor_id); } catch (Throwable $e) { /* log if needed */ }
+            }
+
+            return Response::json(['success' => (bool)$ok, 'appointment_id' => $id, 'status' => 'completed', 'next_assigned' => $promoted]);
+        } catch (Throwable $e) {
+            return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
+        }
+    }
+
+    public function updateScheduledTime(int $id)
+    {
+        try {
+            $body = $this->readBody();
+            $timeRaw = (string)($body['scheduled_time'] ?? '');
+            $normalized = $this->normalizeDateTime($timeRaw);
+            if (!$normalized) return Response::json(['error' => 'Invalid scheduled_time format'], 400);
+            try {
+                $now = new DateTime('now');
+                $sel = new DateTime($normalized);
+                if ($sel < $now) return Response::json(['error' => 'Cannot schedule an appointment in the past'], 400);
+            } catch (Throwable $e) {}
+            $doctorId = isset($body['doctor_id']) ? (int)$body['doctor_id'] : 0;
+            $pdo = Database::getConnection();
+            $apptTbl = Database::table('appointments');
+            if ($doctorId > 0) {
+                $stmt = $pdo->prepare("UPDATE {$apptTbl} SET scheduled_time = :t, doctor_id = :d WHERE appointment_id = :id");
+                $ok = $stmt->execute([':t' => $normalized, ':d' => $doctorId, ':id' => $id]);
+            } else {
+                $stmt = $pdo->prepare("UPDATE {$apptTbl} SET scheduled_time = :t WHERE appointment_id = :id");
+                $ok = $stmt->execute([':t' => $normalized, ':id' => $id]);
+            }
+            return Response::json(['success' => (bool)$ok, 'appointment_id' => $id, 'scheduled_time' => $normalized, 'doctor_id' => $doctorId ?: null]);
+        } catch (Throwable $e) {
+            return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
+        }
+    }
+
+    public function statusUpdate(int $id)
+    {
+        try {
+            // Support both JSON and form-urlencoded like AuthController::updateUser
+            $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+            $isJson = stripos($contentType, 'application/json') !== false;
+            if ($isJson) {
+                $body = json_decode(file_get_contents('php://input'), true) ?? [];
+            } else {
+                $body = $_POST ?: (json_decode(file_get_contents('php://input'), true) ?? []);
+            }
+            $status = strtolower(trim((string)($body['status'] ?? $body['new_status'] ?? '')));
+            if ($status === '') {
+                return Response::json(['error' => 'missing_status'], 400);
+            }
+            $allowed = ['pending','called','in-consultation','completed','cancelled'];
+            if (!in_array($status, $allowed, true)) {
+                return Response::json(['error' => 'invalid_status', 'allowed' => $allowed], 400);
+            }
+
+            $ok = $this->updateStatus($id, $status);
+
+            $promoted = null;
+            if (in_array($status, ['completed','cancelled'], true)) {
+                $queue = new QueueModel();
+                // look up doctor_id first
+                $pdo = Database::getConnection();
+                $apptTbl = Database::table('appointments');
+                $stmt = $pdo->prepare("SELECT doctor_id FROM {$apptTbl} WHERE appointment_id = :id LIMIT 1");
+                $stmt->execute([':id' => $id]);
+                $row = $stmt->fetch();
+                $doctor_id = $row && isset($row['doctor_id']) ? (int)$row['doctor_id'] : null;
+
+                $queue->removeByAppointment($id);
+                if ($doctor_id) {
+                    try { $promoted = $queue->promoteNextForDoctor($doctor_id); } catch (Throwable $e) { /* ignore */ }
+                }
+            }
+            return Response::json(['success' => (bool)$ok, 'appointment_id' => $id, 'status' => $status, 'next_assigned' => $promoted]);
+        } catch (Throwable $e) {
+            return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
+        }
+    }
+
+    public function current()
+    {
+        $patient_id = (int)($_GET['patient_id'] ?? 0);
+        $user_id = (int)($_GET['user_id'] ?? 0);
+        try {
+            if (!$patient_id && $user_id) {
+                $pdo = Database::getConnection();
+                $patientsTbl = Database::table('patients');
+                $stmt = $pdo->prepare("SELECT patient_id FROM {$patientsTbl} WHERE user_id = :uid LIMIT 1");
+                $stmt->execute([':uid' => $user_id]);
+                $row = $stmt->fetch();
+                if ($row && isset($row['patient_id'])) {
+                    $patient_id = (int)$row['patient_id'];
+                }
+            }
+            if (!$patient_id) {
+                return Response::json(['error' => 'Missing patient_id'], 400);
+            }
+            $appointments = new AppointmentModel();
+            $data = $appointments->getCurrentForPatient($patient_id);
+            if ($data) {
+                if (is_array($data)) { $data['patient_id'] = $patient_id; }
+                return Response::json($data);
+            }
+            return Response::json(['patient_id' => $patient_id]);
+        } catch (Throwable $e) {
+            return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
+        }
+    }
+
+    public function countToday()
+    {
+        try {
+            $pdo = Database::getConnection();
+            $appt = Database::table('appointments');
+            $sql = "SELECT COUNT(*) AS c FROM {$appt} WHERE DATE(scheduled_time) = CURDATE()";
+            $row = $pdo->query($sql)->fetch();
+            $count = (int)($row['c'] ?? 0);
+            return Response::json(['count' => $count]);
+        } catch (Throwable $e) {
+            return Response::json(['error' => 'Server error', 'details' => $e->getMessage()], 500);
+        }
+    }
+}
