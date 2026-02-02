@@ -1,0 +1,28 @@
+# Render Blueprint for SMQS Backend API
+# This tells Render to use Docker for deployment
+
+services:
+  - type: web
+    name: smqs-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.render
+    plan: free
+    region: oregon
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DB_HOST
+        sync: false
+      - key: DB_NAME
+        value: smart_queue_management
+      - key: DB_USER
+        sync: false
+      - key: DB_PASS
+        sync: false
+      - key: DB_CHARSET
+        value: utf8mb4
+      - key: DB_PORT
+        value: 3306
+      - key: JWT_SECRET
+        generateValue: true
+    healthCheckPath: /ping
