@@ -1,13 +1,16 @@
 # Render Blueprint for SMQS Backend API
-# This tells Render to use Docker for deployment
+# This file tells Render to use Docker for deployment
 
 services:
   - type: web
     name: smqs-api
-    runtime: docker
+    env: docker
     dockerfilePath: ./Dockerfile.render
     plan: free
     region: oregon
+    branch: main
+    buildCommand: ""
+    startCommand: ""
     envVars:
       - key: APP_ENV
         value: production
