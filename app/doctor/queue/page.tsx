@@ -222,8 +222,28 @@ export default function DoctorQueuePage() {
    }
  }
 
-  const handleCallNext = (id: string) => {
-    // Updated: handled in handleCallNext to set in-consultation and cancel others
+  const handleCallNext = async (id: string) => {
+    try {
+      const p = queue.find((q) => q.id === id)
+      if (!p) return
+
+      // Update status to in-consultation on the backend
+      const res = await fetch(
+        `/api/php/appointments/status?id=${encodeURIComponent(String(p.appointmentId))}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'in-consultation' }) }
+      )
+      if (!res.ok) {
+        console.error('call next failed', await res.text())
+        return
+      }
+
+      // Optimistic UI update: set this patient to in-consultation
+      setQueue((prev) =>
+        prev.map((q) => (q.id === id ? { ...q, status: 'in-consultation' } : q))
+      )
+    } catch (e) {
+      console.error('call next error', e)
+    }
   }
 
   const handleMoveUp = (id: string, currentPos: number) => {

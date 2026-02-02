@@ -5,6 +5,7 @@ import { Analytics } from "@vercel/analytics/next"
 import { AuthProvider } from "@/lib/auth-context"
 import { QueueProvider } from "@/lib/queue-context"
 import { NotificationProvider } from "@/components/notification-provider"
+import { DBInitializer } from "@/components/db-initializer"
 import "./globals.css"
 
 const _geist = Geist({ subsets: ["latin"] })
@@ -24,6 +25,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`font-sans antialiased`}>
+        <DBInitializer />
         <AuthProvider>
           <QueueProvider>
             <NotificationProvider>{children}</NotificationProvider>

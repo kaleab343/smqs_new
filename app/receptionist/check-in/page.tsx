@@ -86,7 +86,7 @@ export default function ReceptionistCheckInPage() {
      const run = async () => {
        try {
          setLoadingDoctors(true)
-         const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "").trim() || "http://127.0.0.1/code_(1)/db_samp/api/index.php"
+         const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "").trim() || "http://localhost/SMQS/db_samp/api/index.php"
          const url = `${base}?r=/doctors`
          const res = await fetch(url)
          const data = await res.json()

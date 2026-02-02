@@ -232,7 +232,7 @@ Open http://localhost:3000.
 Point the frontend to your API by setting `NEXT_PUBLIC_PHP_API_BASE` in `.env.local`. Example:
 
 ```
-NEXT_PUBLIC_PHP_API_BASE=http://127.0.0.1/code_(1)/db_samp/api/index.php
+NEXT_PUBLIC_PHP_API_BASE=http://localhost/SMQS/db_samp/api/index.php
 ```
 
 The helper in `lib/php-api-config.ts` normalizes trailing slashes and safely encodes parentheses for some Apache setups.

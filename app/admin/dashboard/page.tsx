@@ -147,7 +147,7 @@ export default function AdminDashboard() {
     const load = async () => {
       try {
         // Call PHP API directly using its friendly route
-        const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "http://127.0.0.1/code_(1)/db_samp/api/index.php").replace(/\/?$/, "")
+        const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "http://localhost/SMQS/db_samp/api/index.php").replace(/\/?$/, "")
         const res = await fetch(`${base}?r=/admin/stats`, { cache: 'no-store' })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
@@ -173,7 +173,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     const loadActivities = async () => {
       try {
-        const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "http://127.0.0.1/code_(1)/db_samp/api/index.php").replace(/\/?$/, "")
+        const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "http://localhost/SMQS/db_samp/api/index.php").replace(/\/?$/, "")
         const res = await fetch(`${base}?r=/admin/activities&limit=50`, { cache: 'no-store' })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
@@ -455,7 +455,7 @@ export default function AdminDashboard() {
                   className="bg-red-600 hover:bg-red-700"
                   onClick={async () => {
                     try {
-                      const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "http://127.0.0.1/code_(1)/db_samp/api/index.php").replace(/\/?$/, "")
+                      const base = (process.env.NEXT_PUBLIC_PHP_API_BASE || "http://localhost/SMQS/db_samp/api/index.php").replace(/\/?$/, "")
                       const params = new URLSearchParams()
                       if (fromDate) params.set('from', new Date(fromDate).toISOString())
                       if (toDate) params.set('to', new Date(toDate).toISOString())

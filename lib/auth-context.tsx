@@ -88,7 +88,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (!lastResp) {
-        throw new Error('Failed to fetch (login): ' + (attempts[0]?.url || pretty))
+        const errorMsg = lastErr ? 
+          `Cannot connect to backend server. Please ensure:\n1. XAMPP is running\n2. Apache and MySQL are started\n3. Backend URL is correct: ${attempts[0]?.url || pretty}\n\nError: ${lastErr.message}` :
+          `Failed to connect to backend: ${attempts[0]?.url || pretty}`
+        throw new Error(errorMsg)
       }
 
       const text = await lastResp.text()
@@ -178,12 +181,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (!lastResp) {
-        throw new Error('Failed to fetch (signup): ' + (attempts[0]?.url || pretty))
+        const errorMsg = lastErr ? 
+          `Cannot connect to backend server. Please ensure:\n1. XAMPP is running\n2. Apache and MySQL are started\n3. Backend URL is correct: ${attempts[0]?.url || pretty}\n\nError: ${lastErr.message}` :
+          `Failed to connect to backend: ${attempts[0]?.url || pretty}`
+        throw new Error(errorMsg)
       }
 
-      let text = await lastResp.text()
+      const text = await lastResp.text()
       let data: any = null
-      try { data = text ? JSON.parse(text) : null } catch { data = { message: text } }
+      try { 
+        data = text ? JSON.parse(text) : { message: text } 
+      } catch { 
+        data = { message: text } 
+      }
+      
       if (!lastResp.ok) {
         throw new Error(data?.error || data?.message || `Signup failed (${lastResp.status})`)
       }
